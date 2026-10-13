@@ -12,7 +12,9 @@ from rich.text import Text
 
 from .model import NOTE, RECUR, Notebook, due_datetime
 from .recur import describe, occurrences, parse_rule
-from .render import WEEKDAYS, day_label, due_text
+from rich.cells import cell_len
+
+from .render import WEEKDAYS, column_widths, day_label, due_text, make_grid
 
 
 def _day_title(d: date, today: date) -> Text:
@@ -79,16 +81,16 @@ def render_timeline(console: Console, books: list[Notebook], archive: list[Noteb
     groups: dict[str, list] = defaultdict(list)
     for entry in sorted(entries, key=lambda e: e[0]):
         groups["overdue" if entry[1] else entry[0].date().isoformat()].append(entry)
+    all_rows = [(num, body, when) for rows in groups.values() for _, _, num, body, when in rows]
+    num_w = max([cell_len(r[0].plain) for r in all_rows] + [3]) + 4  # 左边缩进 4 格，落在日期标题下面
+    widths = column_widths(console, all_rows, 1, 2, num_w + 1)  # 编号列 + 编号↔内容的列间空格
     for key, rows in groups.items():
         if key == "overdue":
             console.print(Text("  ⚠ 已逾期", style="jk.overdue"))
         else:
             console.print(_day_title(date.fromisoformat(key), today))
-        grid = Table.grid(padding=(0, 1))
-        grid.add_column(style="jk.muted", justify="right", min_width=6)
-        grid.add_column(overflow="fold")
-        grid.add_column(no_wrap=True)
+        grid = make_grid(widths, [{"style": "jk.muted", "justify": "right", "width": num_w}])
         for _, _, num, body, when in rows:
-            grid.add_row(num, body, when)
-        console.print(Padding(grid, (0, 0, 0, 3)))
+            grid.add_row(num, body, "", when)
+        console.print(grid)
     console.print()

@@ -61,3 +61,42 @@ def test_recur_group_on_top_with_next_time():
     assert "每天 · 下次 今天" in out
     assert out.index("喝水") < out.index("上数值分析课") < out.index("跑步")  # 按下次时间排序
     assert "0% 完成" in out and "3 周期" in out
+
+
+def _ends(out: str, needles: list[str]) -> set[int]:
+    from rich.cells import cell_len
+
+    ends = set()
+    for line in out.splitlines():
+        for n in needles:
+            if line.rstrip().endswith(n):
+                ends.add(cell_len(line.rstrip()))
+    return ends
+
+
+def test_times_right_aligned_across_notebooks():
+    from jk.model import RECUR
+
+    console = make_console(record=True, width=100)
+    books = [
+        Notebook("周期", [Item(13, "开组会", kind=RECUR, every="weekly:3@08:00")]),
+        Notebook("作业", [Item(4, "大数据与信息技术伦理案例", due="2026-10-26T17:00"), Item(1, "交作业 a", state=DONE, due="2026-10-14T15:00")]),
+        Notebook("运动", [Item(12, "室内体育测试", due="2026-10-24T08:00")]),
+    ]
+    render_list(console, books, NOW)
+    out = console.export_text()
+    ends = _ends(out, ["小时）", "还剩 13天", "15:00", "还剩 10天"])
+    assert len(ends) == 1  # 所有时间的右边缘在同一列
+    for line in out.splitlines():
+        if "大数据" in line:  # 内容和时间之间至少隔 GAP 格
+            assert "    " in line.split("大数据与信息技术伦理案例")[1][:4] + "    "
+
+
+def test_narrow_terminal_keeps_icons():
+    from jk.model import RECUR
+
+    console = make_console(record=True, width=50)
+    render_list(console, [Notebook("周期", [Item(13, "开组会", kind=RECUR, every="weekly:3@08:00")])], NOW)
+    out = console.export_text()
+    assert "13. ↻ 开组会" in out
+    assert all(len(line) <= 50 for line in out.splitlines())

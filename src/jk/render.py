@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+from rich.cells import cell_len
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
@@ -111,6 +112,36 @@ def item_row(item: Item, now: datetime) -> tuple[Text, Text, Text, Text]:
     return num, Text(icon, style=color), body, due_text(item, now)
 
 
+GAP = 4  # 内容和右侧时间之间至少空几格
+MIN_TEXT = 16  # 终端再窄，内容列也至少留这么宽
+
+
+def column_widths(console: Console, rows: list[tuple], text_col: int, time_col: int, fixed: int) -> tuple[int, int]:
+    """所有分组共用的（内容宽, 时间宽）：时间统一贴右对齐，内容列按最长一条撑开。
+
+    终端太窄时先让内容折行（最少 MIN_TEXT 格），还不够再让时间列折行。
+    fixed = 除内容列、时间列和 GAP 以外占的宽度（缩进、编号、图标、列间空格）。
+    """
+    time_w = max((cell_len(r[time_col].plain) for r in rows), default=0)
+    text_w = max((cell_len(r[text_col].plain) for r in rows), default=0)
+    room = console.width - fixed - GAP
+    text_w = min(text_w, max(MIN_TEXT, room - time_w))
+    time_w = max(0, min(time_w, room - text_w))
+    return text_w, time_w
+
+
+def make_grid(widths: tuple[int, int], lead: list[dict]) -> Table:
+    """lead = 内容列前面那几列的设置（编号、图标等）。"""
+    text_w, time_w = widths
+    grid = Table.grid(padding=(0, 1))
+    for col in lead:
+        grid.add_column(**col)
+    grid.add_column(width=text_w, overflow="fold")
+    grid.add_column(width=GAP - 2)  # 和左右的列间空格合起来正好 GAP 格
+    grid.add_column(width=time_w, justify="right", overflow="fold")
+    return grid
+
+
 def notebook_header(nb: Notebook) -> Text:
     tasks = [i for i in nb.items if i.is_task]
     title = Text(f"  {nb.name}", style="bold underline")
@@ -130,17 +161,20 @@ def render_list(console: Console, books: list[Notebook], now: datetime | None = 
     if not books:
         console.print("\n  [jk.muted]还没有内容。试试：[/]jk a 明天下午三点前交作业 a\n")
         return
-    console.print()
+    groups = []
     for nb in books:
-        console.print(notebook_header(nb))
-        grid = Table.grid(padding=(0, 1))
-        grid.add_column(justify="right", min_width=5)
-        grid.add_column()
-        grid.add_column(overflow="fold")
-        grid.add_column(justify="right", no_wrap=True)
         items = sorted(nb.items, key=lambda i: recur_key(i, now)) if nb.name == RECUR_BOOK else sorted(nb.items, key=sort_key)
-        for item in items:
-            grid.add_row(*item_row(item, now))
+        groups.append((nb, [item_row(item, now) for item in items]))
+    num_w = max(cell_len(r[0].plain) for _, rows in groups for r in rows) + 2  # 左边留 2 格缩进，和分组标题对齐
+    num_w = max(num_w, 5)
+    # 固定宽度：编号列 + 图标 1 格 + 编号↔图标、图标↔内容两处列间空格
+    widths = column_widths(console, [r for _, rows in groups for r in rows], 2, 3, num_w + 1 + 2)
+    console.print()
+    for nb, rows in groups:
+        console.print(notebook_header(nb))
+        grid = make_grid(widths, [{"justify": "right", "width": num_w}, {"width": 1}])
+        for num, icon, body, when in rows:
+            grid.add_row(num, icon, body, "", when)
         console.print(grid)
         console.print()
     console.print(summary(books))
