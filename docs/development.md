@@ -32,6 +32,12 @@ JK_HOME=/tmp/jk-test uv run jk   # 用临时数据目录试，不碰真实数据
 | `migrate.py` | 数据格式版本与迁移（`MIGRATIONS` 里登记每一级升级） |
 | `recur.py` | 周期规则解析、下次时间、给人看的描述 |
 
+## 更新 README 截图
+
+改了界面后运行 `uv run python tools/gen-demo.py`，会重新生成 `docs/images/*.png`。
+数据是脚本里写死的虚构示例，时间固定为 2026-10-14 09:30，所以结果可重复。
+需要 firefox、ImageMagick，以及字体 Noto Sans Mono CJK SC、Adwaita Mono。
+
 ## 改数据格式的步骤
 
 1. `model.FORMAT_VERSION` +1。
