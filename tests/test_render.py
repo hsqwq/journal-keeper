@@ -87,9 +87,8 @@ def test_times_right_aligned_across_notebooks():
     out = console.export_text()
     ends = _ends(out, ["小时）", "还剩 13天", "15:00", "还剩 10天"])
     assert len(ends) == 1  # 所有时间的右边缘在同一列
-    for line in out.splitlines():
-        if "大数据" in line:  # 内容和时间之间至少隔 GAP 格
-            assert "    " in line.split("大数据与信息技术伦理案例")[1][:4] + "    "
+    longest = next(line for line in out.splitlines() if "大数据" in line)
+    assert longest.split("大数据与信息技术伦理案例")[1].startswith(" " * 4)  # 最长一条和时间之间也至少隔 GAP 格
 
 
 def test_narrow_terminal_keeps_icons():
