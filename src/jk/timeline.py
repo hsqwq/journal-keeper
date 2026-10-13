@@ -71,7 +71,8 @@ def render_timeline(console: Console, books: list[Notebook], archive: list[Noteb
             elif it.kind == RECUR and it.every:
                 rule = parse_rule(it.every)
                 for moment in occurrences(rule, now, datetime.combine(today + timedelta(days=days - 1), datetime.max.time())):
-                    body = Text("↻ ", style="jk.recur")
+                    body = Text()  # 不能写 Text("↻ ", style=…)：那会成为整行的底色样式
+                    body.append("↻ ", style="jk.recur")
                     body.append(it.text)
                     body.append(f"  [{describe(rule)}]", style="jk.muted")
                     clock = Text(moment.strftime("%H:%M") if rule.at else "全天", style="jk.later")
