@@ -15,6 +15,7 @@ from .model import DONE, NOTE, TODO, fmt_dt, now_minute
 from .ops import apply
 from .render import render_list
 from .store import Store, find_item
+from .timeline import render_timeline
 
 console = Console(highlight=False)
 err = Console(stderr=True, highlight=False)
@@ -166,6 +167,18 @@ def cmd_undo(cfg: Config, args: list[str]) -> int:
     return cmd_list(cfg, [])
 
 
+def cmd_timeline(cfg: Config, args: list[str]) -> int:
+    days = 7
+    if args:
+        if not args[0].isdigit() or int(args[0]) < 1:
+            err.print("[red]天数必须是正整数[/]，例：jk t 14")
+            return 2
+        days = int(args[0])
+    store, books = open_store(cfg)
+    render_timeline(console, books, store.load_archive(), days)
+    return 0
+
+
 def cmd_help(cfg: Config, args: list[str]) -> int:
     console.print(HELP.format(home=cfg.home))
     return 0
@@ -174,6 +187,7 @@ def cmd_help(cfg: Config, args: list[str]) -> int:
 COMMANDS = {
     "a": cmd_ai,
     "c": cmd_check,
+    "t": cmd_timeline,
     "undo": cmd_undo,
     "help": cmd_help,
     "-h": cmd_help,
