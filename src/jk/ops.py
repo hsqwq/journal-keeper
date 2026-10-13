@@ -13,7 +13,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 
-from .model import DONE, NOTE, STATES, TASK, Item, Notebook, clean_text, fmt_dt, now_minute, parse_due
+from .model import DONE, KINDS, NOTE, RECUR, RECUR_BOOK, STATES, TASK, Item, Notebook, clean_text, fmt_dt, now_minute, parse_due
+from .recur import describe, parse_rule
 from .store import find_item, get_notebook, next_free_id
 
 MAX_NAME = 20
@@ -58,6 +59,19 @@ def _due(value) -> str | None:
         raise PlanError(f"due 格式不对：{value!r}（用 YYYY-MM-DD 或 YYYY-MM-DDTHH:MM）") from None
 
 
+def _every(value) -> str:
+    try:
+        return str(parse_rule(value))
+    except ValueError as exc:
+        raise PlanError(f"every 不对：{exc}") from None
+
+
+def _kind(value) -> str:
+    if value not in KINDS:
+        raise PlanError(f"kind 只能是 task / note / recur：{value!r}")
+    return value
+
+
 def _text(value) -> str:
     text = clean_text(value or "")
     if not text:
@@ -69,7 +83,8 @@ def validate(ops, books: list[Notebook]) -> list[dict]:
     """校验并规范化；不修改 books。"""
     if not isinstance(ops, list):
         raise PlanError("ops 必须是数组")
-    ids = {it.id for nb in books for it in nb.items}
+    kinds = {it.id: it.kind for nb in books for it in nb.items}
+    ids = set(kinds)
     names = {nb.name for nb in books}
     deleted: set[int] = set()
     out = []
@@ -78,15 +93,23 @@ def validate(ops, books: list[Notebook]) -> list[dict]:
             raise PlanError(f"第 {n} 条操作不是对象")
         kind = op.get("op")
         if kind == "add":
-            item_kind = op.get("kind", TASK)
-            if item_kind not in (TASK, NOTE):
-                raise PlanError(f"kind 只能是 task 或 note：{item_kind!r}")
+            item_kind = _kind(op.get("kind", TASK))
+            if item_kind == RECUR:
+                out.append({
+                    "op": "add", "notebook": RECUR_BOOK, "kind": RECUR, "text": _text(op.get("text")),
+                    "every": _every(op.get("every")), "due": None, "priority": 1, "state": "todo",
+                    "allow_duplicate": op.get("allow_duplicate") is True,
+                })
+                continue
+            notebook = _name(op.get("notebook"))
+            if notebook == RECUR_BOOK:
+                raise PlanError(f"「{RECUR_BOOK}」记事本只放周期条目（kind=recur）")
             state = op.get("state", "todo")
             if state not in STATES:
                 raise PlanError(f"state 只能是 {'/'.join(STATES)}：{state!r}")
             out.append({
                 "op": "add",
-                "notebook": _name(op.get("notebook")),
+                "notebook": notebook,
                 "kind": item_kind,
                 "text": _text(op.get("text")),
                 "due": _due(op.get("due")) if item_kind == TASK else None,
@@ -106,6 +129,20 @@ def validate(ops, books: list[Notebook]) -> list[dict]:
                 out.append({"op": "delete", "id": item_id})
                 continue
             clean: dict = {"op": "update", "id": item_id}
+            if kinds[item_id] == RECUR:
+                extra = sorted(set(op) - {"op", "id", "text", "every"})
+                if extra:
+                    raise PlanError(f"编号 {item_id} 是周期条目，只能改 text 和 every，不能改 {'/'.join(extra)}；不要了就 delete")
+                if "text" in op:
+                    clean["text"] = _text(op["text"])
+                if "every" in op:
+                    clean["every"] = _every(op["every"])
+                if len(clean) == 2:
+                    raise PlanError(f"编号 {item_id} 的 update 没有要改的字段")
+                out.append(clean)
+                continue
+            if "every" in op:
+                raise PlanError(f"编号 {item_id} 不是周期条目，不能设 every；要变成周期请 delete 后用 kind=recur 重新 add")
             if "text" in op:
                 clean["text"] = _text(op["text"])
             if "due" in op:
@@ -118,9 +155,11 @@ def validate(ops, books: list[Notebook]) -> list[dict]:
                 clean["state"] = op["state"]
             if "notebook" in op:
                 clean["notebook"] = _name(op["notebook"])
+                if clean["notebook"] == RECUR_BOOK:
+                    raise PlanError(f"「{RECUR_BOOK}」记事本只放周期条目")
             if "kind" in op:
-                if op["kind"] not in (TASK, NOTE):
-                    raise PlanError(f"kind 只能是 task 或 note：{op['kind']!r}")
+                if _kind(op["kind"]) == RECUR:
+                    raise PlanError("不能把任务或笔记改成周期；请 delete 后用 kind=recur 重新 add")
                 clean["kind"] = op["kind"]
             if len(clean) == 2:
                 raise PlanError(f"编号 {item_id} 的 update 没有要改的字段")
@@ -130,6 +169,8 @@ def validate(ops, books: list[Notebook]) -> list[dict]:
             if old not in names:
                 raise PlanError(f"记事本 {old!r} 不存在")
             new = _name(op.get("to"))
+            if RECUR_BOOK in (old, new):
+                raise PlanError(f"「{RECUR_BOOK}」记事本由程序管理，不能改名或合并")
             names.discard(old)
             names.add(new)
             out.append({"op": "rename_notebook", "from": old, "to": new})
@@ -159,10 +200,13 @@ def apply(ops: list[dict], books: list[Notebook]) -> list[Change]:
                 pri=op["priority"],
                 created=now,
                 done_at=now if op["state"] == DONE else None,
+                every=op.get("every"),
             )
             used.add(item.id)
             get_notebook(books, op["notebook"]).items.append(item)
             extra = [f"[{op['notebook']}]"]
+            if item.every:
+                extra.append(describe(parse_rule(item.every)))
             if item.due:
                 extra.append(f"截止 {_describe_due(item.due)}")
             changes.append(Change("add", f"{item.id}. {item.text}", " ".join(extra)))
@@ -176,6 +220,9 @@ def apply(ops: list[dict], books: list[Notebook]) -> list[Change]:
             if "text" in op and op["text"] != item.text:
                 notes.append(f"内容「{item.text}」→「{op['text']}」")
                 item.text = op["text"]
+            if "every" in op and op["every"] != item.every:
+                notes.append(f"{describe(parse_rule(item.every))} → {describe(parse_rule(op['every']))}")
+                item.every = op["every"]
             if "due" in op and op["due"] != item.due:
                 notes.append(f"截止 {_describe_due(item.due)} → {_describe_due(op['due'])}")
                 item.due = op["due"]
@@ -241,17 +288,26 @@ def similar(a: str, b: str) -> bool:
     return SequenceMatcher(None, a, b).ratio() >= SIMILAR
 
 
+def _when(item_or_op) -> str | None:
+    """去重比较用的时间键：任务是截止日期，周期是规则。"""
+    every = item_or_op.get("every") if isinstance(item_or_op, dict) else item_or_op.every
+    due = item_or_op.get("due") if isinstance(item_or_op, dict) else item_or_op.due
+    return f"R:{every}" if every else due
+
+
 def _same_due(a: str | None, b: str | None) -> bool:
-    """截止时间一样，或者有一方没写，才算同一件事；截止不同（例如每周的周报）不算重复。"""
+    """截止时间一样，或者有一方没写，才算同一件事；截止不同（例如每周的周报）不算重复。周期要求规则完全一样。"""
+    if (a or "").startswith("R:") or (b or "").startswith("R:"):
+        return a == b
     return a is None or b is None or a[:10] == b[:10]
 
 
 def dedupe(ops: list[dict], books: list[Notebook], archive: list[Notebook], now: datetime) -> tuple[list[dict], list[Change]]:
     """程序兜底去重：拦下和已有条目、近期归档、或同一批里前面条目重复的 add。返回（剩下的操作，跳过说明）。"""
     since = (now.date() - timedelta(days=ARCHIVE_LOOKBACK_DAYS)).isoformat()
-    existing = [(it.kind, it.text, it.due, f"{it.id}. {it.text}", "") for nb in books for it in nb.items]
+    existing = [(it.kind, it.text, _when(it), f"{it.id}. {it.text}", "") for nb in books for it in nb.items]
     existing += [
-        (it.kind, it.text, it.due, it.text, f"已于 {it.done_at[:10]} 完成并归档")
+        (it.kind, it.text, _when(it), it.text, f"已于 {it.done_at[:10]} 完成并归档")
         for nb in archive
         for it in nb.items
         if it.done_at and it.done_at[:10] >= since
@@ -262,7 +318,7 @@ def dedupe(ops: list[dict], books: list[Notebook], archive: list[Notebook], now:
             kept.append(op)
             continue
         match = next(
-            (e for e in existing if e[0] == op["kind"] and similar(e[1], op["text"]) and _same_due(e[2], op["due"])),
+            (e for e in existing if e[0] == op["kind"] and similar(e[1], op["text"]) and _same_due(e[2], _when(op))),
             None,
         )
         if match:
@@ -270,7 +326,7 @@ def dedupe(ops: list[dict], books: list[Notebook], archive: list[Notebook], now:
             skipped.append(Change("dup", match[3], reason))
             continue
         kept.append(op)
-        existing.append((op["kind"], op["text"], op["due"], op["text"], "同一次里重复出现"))
+        existing.append((op["kind"], op["text"], _when(op), op["text"], "同一次里重复出现"))
     return kept, skipped
 
 
