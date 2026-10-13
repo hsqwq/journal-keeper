@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+dist/
+.pytest_cache/
+.env
+
+# AI 开发日志（仅本地）
+memory/
