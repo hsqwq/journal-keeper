@@ -7,12 +7,18 @@ AI 只能返回下面四种操作，程序逐条校验，全部合法才执行�
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+from difflib import SequenceMatcher
 
 from .model import DONE, NOTE, STATES, TASK, Item, Notebook, clean_text, fmt_dt, now_minute, parse_due
 from .store import find_item, get_notebook, next_free_id
 
 MAX_NAME = 20
+ARCHIVE_LOOKBACK_DAYS = 30  # AI 能看到、去重会对比的归档范围
+SIMILAR = 0.85  # 文字相似度阈值（0~1）
 
 
 class PlanError(ValueError):
@@ -86,6 +92,7 @@ def validate(ops, books: list[Notebook]) -> list[dict]:
                 "due": _due(op.get("due")) if item_kind == TASK else None,
                 "priority": _pri(op.get("priority", 1)),
                 "state": state if item_kind == TASK else "todo",
+                "allow_duplicate": op.get("allow_duplicate") is True,
             })
         elif kind in ("update", "delete"):
             try:
@@ -208,3 +215,88 @@ def apply(ops: list[dict], books: list[Notebook]) -> list[Change]:
                 src.name = op["to"]
                 changes.append(Change("rename", f"[{op['from']}] 改名为 [{op['to']}]"))
     return changes
+
+
+# ---------- 去重 ----------
+
+def normalize(text: str) -> str:
+    """去掉空格和标点、统一全半角与大小写，只留文字和数字。"""
+    text = unicodedata.normalize("NFKC", text).lower()
+    return "".join(ch for ch in text if ch.isalnum())
+
+
+def similar(a: str, b: str) -> bool:
+    """保守判断两句话是不是同一件事。
+
+    数字和英文字母必须完全一致（「作业4」和「作业5」不是同一件事），其余文字相似度 >= SIMILAR。
+    换了说法的重复交给 AI 判断，这里只拦明显的。
+    """
+    a, b = normalize(a), normalize(b)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if re.findall(r"[0-9a-z]+", a) != re.findall(r"[0-9a-z]+", b):
+        return False
+    return SequenceMatcher(None, a, b).ratio() >= SIMILAR
+
+
+def _same_due(a: str | None, b: str | None) -> bool:
+    """截止时间一样，或者有一方没写，才算同一件事；截止不同（例如每周的周报）不算重复。"""
+    return a is None or b is None or a[:10] == b[:10]
+
+
+def dedupe(ops: list[dict], books: list[Notebook], archive: list[Notebook], now: datetime) -> tuple[list[dict], list[Change]]:
+    """程序兜底去重：拦下和已有条目、近期归档、或同一批里前面条目重复的 add。返回（剩下的操作，跳过说明）。"""
+    since = (now.date() - timedelta(days=ARCHIVE_LOOKBACK_DAYS)).isoformat()
+    existing = [(it.kind, it.text, it.due, f"{it.id}. {it.text}", "") for nb in books for it in nb.items]
+    existing += [
+        (it.kind, it.text, it.due, it.text, f"已于 {it.done_at[:10]} 完成并归档")
+        for nb in archive
+        for it in nb.items
+        if it.done_at and it.done_at[:10] >= since
+    ]
+    kept, skipped = [], []
+    for op in ops:
+        if op["op"] != "add" or op.get("allow_duplicate"):
+            kept.append(op)
+            continue
+        match = next(
+            (e for e in existing if e[0] == op["kind"] and similar(e[1], op["text"]) and _same_due(e[2], op["due"])),
+            None,
+        )
+        if match:
+            reason = match[4] or f"和「{op['text']}」重复，没有再添加"
+            skipped.append(Change("dup", match[3], reason))
+            continue
+        kept.append(op)
+        existing.append((op["kind"], op["text"], op["due"], op["text"], "同一次里重复出现"))
+    return kept, skipped
+
+
+def skipped_changes(skipped: list[dict], books: list[Notebook]) -> list[Change]:
+    """AI 自己报告的「已存在、没添加」。"""
+    result = []
+    for entry in skipped:
+        hit = find_item(books, entry["id"])
+        if hit:
+            result.append(Change("dup", f"{hit[1].id}. {hit[1].text}", entry.get("reason", "")))
+    return result
+
+
+def validate_skipped(raw, books: list[Notebook]) -> list[dict]:
+    """skipped 只是说明，不合法的条目直接丢掉，不让 AI 重来。"""
+    if not isinstance(raw, list):
+        return []
+    ids = {it.id for nb in books for it in nb.items}
+    out = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            item_id = int(entry.get("id"))
+        except (TypeError, ValueError):
+            continue
+        if item_id in ids and item_id not in {e["id"] for e in out}:
+            out.append({"id": item_id, "reason": clean_text(entry.get("reason") or "")})
+    return out

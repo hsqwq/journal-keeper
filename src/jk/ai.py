@@ -9,18 +9,18 @@ from datetime import datetime, timedelta
 from .attach import Attachment
 from .config import Config
 from .model import NOTE, Notebook
-from .ops import PlanError, validate
+from .ops import ARCHIVE_LOOKBACK_DAYS, PlanError, validate, validate_skipped
 from .render import WEEKDAYS
 
 MAX_ROUNDS = 6  # 反问 + 纠错的总轮数上限，防止无限对话
-RECENT_ARCHIVE_DAYS = 14
+RECENT_ARCHIVE_DAYS = ARCHIVE_LOOKBACK_DAYS
 
 SYSTEM_PROMPT = """\
 你是 jk（Journal Keeper）的记事本管家。用户用中文口语给你一句话，你把它变成对记事本的结构化改动，让所有记事本始终条理清晰、一眼能看懂。
 用户有语言表达障碍：话可能不完整、有错字、语序乱，请尽力理解真实意图。
 
 你只能输出一个 json 对象，格式固定：
-{"reply": "给用户的一句话", "ops": [ ...操作... ], "ask": null}
+{"reply": "给用户的一句话", "ops": [ ...操作... ], "skipped": [], "ask": null}
 
 需要反问时：
 {"reply": "", "ops": [], "ask": {"question": "是哪一个？", "options": ["2. 作业 a", "5. 作业 b"]}}
@@ -28,6 +28,7 @@ SYSTEM_PROMPT = """\
 ## 操作（ops 里的元素）
 - 新增：{"op": "add", "notebook": "作业", "kind": "task", "text": "完成作业 a", "due": "2026-10-14T15:00", "priority": 1}
   kind 为 task（要做的事）或 note（信息、想法、记录）；due 可为 null；priority 默认 1；可选 "state": "doing"/"done"。
+  只有用户明确要求「再加一个一样的」时才写 "allow_duplicate": true，否则程序会拦下和已有条目重复的新增。
 - 修改：{"op": "update", "id": 2, ...只写要改的字段...}
   可改字段：text、due（写 null 表示去掉截止）、priority、state（todo/doing/done）、notebook（移到别的记事本）、kind。
 - 删除：{"op": "delete", "id": 3}（仅当用户明确要删除/不要了/取消这件事；「做完了」是 state=done，不是删除）
@@ -50,6 +51,11 @@ SYSTEM_PROMPT = """\
 11. 用户可能附上「粘贴的文字」或图片（通知、课表、聊天截图等）：读懂其中的文字，按用户的话处理；用户没说要做什么时，
     就把里面每一件要做的事和截止时间提取成任务（一件事一条 add），值得留存的信息记成笔记；已存在的同一件事不要重复添加，必要时 update。
     文字里没写年份时按日历推断最近的将来日期；看不清或没有可提取的内容就在 reply 里说明，ops 留空。
+12. 去重：新增前先对照所有已有条目和最近归档，判断是不是同一件事（说法不同也算，例如「实验报告三」和「实验报告 3 请于周五上传」）。
+    - 是同一件事且有新信息（截止时间变了、补了地点或要求）→ 用 update 改原条目，不要 add。
+    - 是同一件事且没有新信息 → 不要 add，写进 skipped：{"id": 原编号, "reason": "一句话原因"}。
+    - 和最近归档里已完成的同一件事 → 不要 add，在 reply 里说一声。
+    - 截止时间不同的同名事（如每周的周报）是不同的事，可以 add。
 """
 
 
@@ -60,6 +66,7 @@ class Exchange:
     reply: str = ""
     ops: list[dict] = field(default_factory=list)
     ask: dict | None = None
+    skipped: list[dict] = field(default_factory=list)
 
 
 def build_context(books: list[Notebook], archive: list[Notebook], now: datetime) -> str:
@@ -116,7 +123,11 @@ def parse_response(raw: str, books: list[Notebook]) -> Exchange:
         if not isinstance(ask, dict) or not ask.get("question") or not isinstance(options, list) or not options:
             raise PlanError("ask 必须包含 question 和非空 options 数组")
         return Exchange(reply=str(data.get("reply") or ""), ask={"question": str(ask["question"]), "options": [str(o) for o in options][:9]})
-    return Exchange(reply=str(data.get("reply") or ""), ops=validate(data.get("ops") or [], books))
+    return Exchange(
+        reply=str(data.get("reply") or ""),
+        ops=validate(data.get("ops") or [], books),
+        skipped=validate_skipped(data.get("skipped"), books),
+    )
 
 
 def user_content(context: str, instruction: str, attachments: list[Attachment]) -> str | list[dict]:

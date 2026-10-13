@@ -24,6 +24,7 @@ PALETTE = {
     "add": "#9ff2e8",          # ＋ 新增
     "update": "#ffe066",       # ✎ 修改
     "delete": "#ff739e",       # ✖ 删除
+    "dup": "#d8c8a8",          # ≈ 已存在（浅卡其）
     "error": "bold #ff739e",   # 错误
     "ask": "bold #ffe066",     # AI 反问
 }
