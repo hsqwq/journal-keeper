@@ -135,7 +135,7 @@ class Notebook:
             f"# {self.name}",
             "",
         ]
-        lines += [it.to_line() for it in sorted(self.items, key=lambda i: i.id)]
+        lines += [it.to_line() for it in self.items]
         if self.extra:
             lines += ["", *self.extra]
         return "\n".join(lines) + "\n"

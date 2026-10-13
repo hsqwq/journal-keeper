@@ -74,6 +74,7 @@ class Store:
         for nb in books:
             if not nb.items and not nb.extra:
                 continue
+            nb.items.sort(key=lambda i: i.id)
             fname = safe_filename(nb.name)
             keep.add(fname)
             path = self.notebooks_dir / fname
