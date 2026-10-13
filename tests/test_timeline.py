@@ -33,3 +33,23 @@ def test_review_and_upcoming():
 def test_empty():
     out = output([], [])
     assert "这几天没有记录" in out and "没有带截止时间" in out
+
+
+def test_recur_expanded_in_upcoming():
+    from jk.model import RECUR
+
+    books = [
+        Notebook("周期", [
+            Item(6, "跑步", kind=RECUR, every="weekly:1@08:00"),
+            Item(7, "上课", kind=RECUR, every="weekly:2,4@16:00"),
+            Item(8, "喝水", kind=RECUR, every="daily"),
+        ]),
+        Notebook("作业", [Item(2, "交报销单", due="2026-10-12")]),
+    ]
+    out = output(books, [], days=7)  # 周二 18:00 起 7 天：到下周一
+    upcoming = out.split("即将到期")[1]
+    assert upcoming.count("↻ 上课") == 1  # 本周四；今天 16:00 已过，下周二超出窗口
+    assert upcoming.count("↻ 跑步") == 1 and "08:00" in upcoming
+    assert upcoming.count("↻ 喝水") == 7 and "全天" in upcoming
+    overdue = upcoming.split("⚠ 已逾期")[1].split("10-13")[0]
+    assert "交报销单" in overdue and "喝水" not in overdue  # 今天的全天周期不算逾期

@@ -10,7 +10,8 @@ from rich.padding import Padding
 from rich.table import Table
 from rich.text import Text
 
-from .model import NOTE, Notebook, due_datetime
+from .model import NOTE, RECUR, Notebook, due_datetime
+from .recur import describe, occurrences, parse_rule
 from .render import WEEKDAYS, day_label, due_text
 
 
@@ -54,17 +55,31 @@ def render_timeline(console: Console, books: list[Notebook], archive: list[Noteb
         console.print(Padding(grid, (0, 0, 0, 3)))
 
     # ---------- 前瞻 ----------
+    # 带截止的未完成任务全部列出；周期条目展开成接下来 days 天里的每一次
     console.print()
     console.print(Text("  即将到期", style="bold underline"))
-    upcoming = [(nb, it) for nb in books for it in nb.items if it.is_open and it.due]
-    if not upcoming:
+    entries: list[tuple[datetime, bool, Text, Text, Text]] = []  # (时刻, 已逾期, 编号, 内容, 时间)
+    for nb in books:
+        for it in nb.items:
+            if it.is_open and it.due:
+                body = Text(it.text, style="bold" if it.pri > 1 else "")
+                body.append(f"  [{nb.name}]", style="jk.muted")
+                when = due_datetime(it.due)
+                entries.append((when, when < now, Text(f"{it.id}."), body, due_text(it, now)))
+            elif it.kind == RECUR and it.every:
+                rule = parse_rule(it.every)
+                for moment in occurrences(rule, now, datetime.combine(today + timedelta(days=days - 1), datetime.max.time())):
+                    body = Text("↻ ", style="jk.recur")
+                    body.append(it.text)
+                    body.append(f"  [{describe(rule)}]", style="jk.muted")
+                    clock = Text(moment.strftime("%H:%M") if rule.at else "全天", style="jk.later")
+                    entries.append((moment, False, Text(f"{it.id}."), body, clock))  # 周期只列将来，不会逾期
+    if not entries:
         console.print("    [jk.muted]没有带截止时间的未完成任务[/]")
     groups: dict[str, list] = defaultdict(list)
-    for nb, it in sorted(upcoming, key=lambda p: due_datetime(p[1].due)):
-        when = due_datetime(it.due)
-        key = "overdue" if when < now else when.date().isoformat()
-        groups[key].append((nb, it))
-    for key, pairs in groups.items():
+    for entry in sorted(entries, key=lambda e: e[0]):
+        groups["overdue" if entry[1] else entry[0].date().isoformat()].append(entry)
+    for key, rows in groups.items():
         if key == "overdue":
             console.print(Text("  ⚠ 已逾期", style="jk.overdue"))
         else:
@@ -73,9 +88,7 @@ def render_timeline(console: Console, books: list[Notebook], archive: list[Noteb
         grid.add_column(style="jk.muted", justify="right", min_width=6)
         grid.add_column(overflow="fold")
         grid.add_column(no_wrap=True)
-        for nb, it in pairs:
-            body = Text(it.text, style="bold" if it.pri > 1 else "")
-            body.append(f"  [{nb.name}]", style="jk.muted")
-            grid.add_row(f"{it.id}.", body, due_text(it, now))
+        for _, _, num, body, when in rows:
+            grid.add_row(num, body, when)
         console.print(Padding(grid, (0, 0, 0, 3)))
     console.print()
