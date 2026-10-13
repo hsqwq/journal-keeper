@@ -5,11 +5,14 @@ from __future__ import annotations
 import sys
 
 from rich.console import Console
+from rich.markup import escape
 
 from . import __version__, history
+from .ai import AIError, Client, Conversation
 from .archive import auto_archive
 from .config import Config, ensure_env_file, load_config
 from .model import DONE, NOTE, TODO, fmt_dt, now_minute
+from .ops import apply
 from .render import render_list
 from .store import Store, find_item
 
@@ -67,12 +70,90 @@ def cmd_check(cfg: Config, args: list[str]) -> int:
     for _, item in found.values():
         if item.state == DONE:
             item.state, item.done_at = TODO, None
-            console.print(f"  [magenta]☐ 取消完成[/] {item.id}. {item.text}")
+            console.print(f"  [magenta]☐ 取消完成[/] {item.id}. {escape(item.text)}")
         else:
             item.state, item.done_at = DONE, now
-            console.print(f"  [green]✔ 完成[/] {item.id}. {item.text}")
+            console.print(f"  [green]✔ 完成[/] {item.id}. {escape(item.text)}")
     store.save(books)
     render_list(console, books)
+    return 0
+
+
+CHANGE_STYLE = {
+    "add": ("＋ 新增", "cyan"),
+    "done": ("✔ 完成", "green"),
+    "undone": ("☐ 取消完成", "magenta"),
+    "update": ("✎ 修改", "yellow"),
+    "delete": ("✖ 删除", "red"),
+    "rename": ("⇄ 记事本", "blue"),
+}
+
+
+def print_changes(changes) -> None:
+    for ch in changes:
+        label, style = CHANGE_STYLE[ch.kind]
+        line = f"  [{style}]{label}[/] {escape(ch.text)}"
+        if ch.detail:
+            line += f"  [dim]{escape(ch.detail)}[/]"
+        console.print(line)
+
+
+def ask_user(question: str, options: list[str]) -> str | None:
+    """显示反问与编号选项；返回用户的回答，直接回车返回 None（取消）。"""
+    console.print(f"\n  [bold yellow]?[/] {escape(question)}")
+    for n, opt in enumerate(options, 1):
+        console.print(f"    [bold]{n})[/] {escape(opt)}")
+    console.print("  [dim]输入编号，或直接打字回答；直接回车取消[/]")
+    reply = console.input("  > ").strip()
+    if not reply:
+        return None
+    if reply.isdigit() and 1 <= int(reply) <= len(options):
+        return options[int(reply) - 1]
+    return reply
+
+
+def cmd_ai(cfg: Config, args: list[str]) -> int:
+    instruction = " ".join(args).strip()
+    if not instruction:
+        if not sys.stdin.isatty():
+            err.print("[red]请写上要做的事[/]，例：jk a 明天三点前交作业 a")
+            return 2
+        instruction = console.input("  想做什么？> ").strip()
+        if not instruction:
+            return 0
+    store, books = open_store(cfg)
+    try:
+        conv = Conversation(Client(cfg), books, store.load_archive(), instruction, now_minute())
+        while True:
+            with console.status("[dim]AI 思考中…[/]", spinner="dots"):
+                result = conv.step()
+            if not result.ask:
+                break
+            if not sys.stdin.isatty():
+                err.print(f"[yellow]AI 需要你确认[/]：{result.ask['question']} {' / '.join(result.ask['options'])}")
+                err.print("请把话说得更具体一些再试一次。")
+                return 3
+            answer = ask_user(result.ask["question"], result.ask["options"])
+            if answer is None:
+                console.print("  已取消，没有改动。")
+                return 0
+            conv.answer(answer)
+    except AIError as exc:
+        err.print(f"[red]✖[/] {escape(str(exc))}")
+        return 1
+    if result.ops:
+        history.snapshot(store, f"jk a {instruction}")
+        changes = apply(result.ops, books)
+        store.save(books)
+    else:
+        changes = []
+    console.print()
+    if result.reply:
+        console.print(f"  [bold]{escape(result.reply)}[/]")
+    print_changes(changes)
+    if changes:
+        console.print("  [dim]改错了？用 jk undo 撤销[/]")
+        render_list(console, books)
     return 0
 
 
@@ -91,6 +172,7 @@ def cmd_help(cfg: Config, args: list[str]) -> int:
 
 
 COMMANDS = {
+    "a": cmd_ai,
     "c": cmd_check,
     "undo": cmd_undo,
     "help": cmd_help,
