@@ -1,7 +1,7 @@
 # agent-log
 
 ## 状态
-STATE: jk-v0.2.0 | L2-S | 粘贴输入框完成 | confirm=已问 | gates=pytest 84 passed | last_errpath=冒烟测试误把剪贴板密钥发给 DeepSeek
+STATE: jk-v0.2.1 | L1 | 固定配色 | confirm=已问 | gates=pytest 86 passed | last_errpath=冒烟测试误把剪贴板密钥发给 DeepSeek
 - 待办：用真实 DeepSeek Key 跑一轮 `jk a` 实测并据此调提示词。
 
 ## 决策（2026-10-13，用户确认）

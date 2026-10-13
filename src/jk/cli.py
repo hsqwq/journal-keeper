@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sys
 
-from rich.console import Console
 from rich.markup import escape
 
 from . import __version__, history, migrate
@@ -17,10 +16,11 @@ from .model import DONE, NOTE, TODO, fmt_dt, now_minute
 from .ops import apply
 from .render import render_list
 from .store import Store, find_item
+from .theme import make_console
 from .timeline import render_timeline
 
-console = Console(highlight=False)
-err = Console(stderr=True, highlight=False)
+console = make_console()
+err = make_console(stderr=True)
 
 HELP = """\
 [bold]jk[/] — Journal Keeper，AI 帮你整理的终端记事本
@@ -52,12 +52,12 @@ def cmd_list(cfg: Config, args: list[str]) -> int:
 
 def cmd_check(cfg: Config, args: list[str]) -> int:
     if not args:
-        err.print("[red]请给出编号[/]，例：jk c 2 3")
+        err.print("[jk.error]请给出编号[/]，例：jk c 2 3")
         return 2
     try:
         ids = [int(a.lstrip("#")) for a in args]
     except ValueError:
-        err.print("[red]编号必须是数字[/]，例：jk c 2 3")
+        err.print("[jk.error]编号必须是数字[/]，例：jk c 2 3")
         return 2
     store, books = open_store(cfg)
     found = {i: find_item(books, i) for i in ids}
@@ -65,31 +65,31 @@ def cmd_check(cfg: Config, args: list[str]) -> int:
     notes = [str(i) for i, hit in found.items() if hit and hit[1].kind == NOTE]
     if missing or notes:
         if missing:
-            err.print(f"[red]找不到编号[/] {' '.join(missing)}")
+            err.print(f"[jk.error]找不到编号[/] {' '.join(missing)}")
         if notes:
-            err.print(f"[red]这些是笔记，不能标完成[/] {' '.join(notes)}")
+            err.print(f"[jk.error]这些是笔记，不能标完成[/] {' '.join(notes)}")
         return 1
     history.snapshot(store, f"jk c {' '.join(args)}")
     now = fmt_dt(now_minute())
     for _, item in found.values():
         if item.state == DONE:
             item.state, item.done_at = TODO, None
-            console.print(f"  [magenta]☐ 取消完成[/] {item.id}. {escape(item.text)}")
+            console.print(f"  [jk.todo]☐ 取消完成[/] {item.id}. {escape(item.text)}")
         else:
             item.state, item.done_at = DONE, now
-            console.print(f"  [green]✔ 完成[/] {item.id}. {escape(item.text)}")
+            console.print(f"  [jk.done]✔ 完成[/] {item.id}. {escape(item.text)}")
     store.save(books)
     render_list(console, books)
     return 0
 
 
 CHANGE_STYLE = {
-    "add": ("＋ 新增", "cyan"),
-    "done": ("✔ 完成", "green"),
-    "undone": ("☐ 取消完成", "magenta"),
-    "update": ("✎ 修改", "yellow"),
-    "delete": ("✖ 删除", "red"),
-    "rename": ("⇄ 记事本", "bright_white"),
+    "add": ("＋ 新增", "jk.add"),
+    "done": ("✔ 完成", "jk.done"),
+    "undone": ("☐ 取消完成", "jk.todo"),
+    "update": ("✎ 修改", "jk.update"),
+    "delete": ("✖ 删除", "jk.delete"),
+    "rename": ("⇄ 记事本", "jk.note"),
 }
 
 
@@ -98,16 +98,16 @@ def print_changes(changes) -> None:
         label, style = CHANGE_STYLE[ch.kind]
         line = f"  [{style}]{label}[/] {escape(ch.text)}"
         if ch.detail:
-            line += f"  [dim]{escape(ch.detail)}[/]"
+            line += f"  [jk.muted]{escape(ch.detail)}[/]"
         console.print(line)
 
 
 def ask_user(question: str, options: list[str]) -> str | None:
     """显示反问与编号选项；返回用户的回答，直接回车返回 None（取消）。"""
-    console.print(f"\n  [bold yellow]?[/] {escape(question)}")
+    console.print(f"\n  [jk.ask]?[/] {escape(question)}")
     for n, opt in enumerate(options, 1):
         console.print(f"    [bold]{n})[/] {escape(opt)}")
-    console.print("  [dim]输入编号，或直接打字回答；直接回车取消[/]")
+    console.print("  [jk.muted]输入编号，或直接打字回答；直接回车取消[/]")
     reply = console.input("  > ").strip()
     if not reply:
         return None
@@ -123,13 +123,13 @@ def cmd_ai(cfg: Config, args: list[str]) -> int:
             image = image_from_path(arg)
             (attachments if image else words).append(image or arg)
     except AttachError as exc:
-        err.print(f"[red]✖[/] {escape(str(exc))}")
+        err.print(f"[jk.error]✖[/] {escape(str(exc))}")
         return 1
     instruction = " ".join(words).strip()
     if instruction or attachments:
         return run_ai(cfg, instruction, attachments)
     if not sys.stdin.isatty():
-        err.print("[red]请写上要做的事[/]，例：jk a 明天三点前交作业 a")
+        err.print("[jk.error]请写上要做的事[/]，例：jk a 明天三点前交作业 a")
         return 2
     composed = compose(cfg.home / "pastes")
     if composed is None:
@@ -143,11 +143,11 @@ def cmd_ai(cfg: Config, args: list[str]) -> int:
 
 def run_ai(cfg: Config, instruction: str, attachments: list) -> int:
     for att in attachments:
-        console.print(f"  [dim]已读取{escape(att.describe())}[/]")
+        console.print(f"  [jk.muted]已读取{escape(att.describe())}[/]")
     texts = [instruction] + [att.text for att in attachments if att.kind == "text"]
     secret = looks_secret("\n".join(texts))
     if secret:
-        err.print(f"  [bold red]![/] 内容里好像有{secret}，发给 AI 会泄露。")
+        err.print(f"  [jk.error]![/] 内容里好像有{secret}，发给 AI 会泄露。")
         if not sys.stdin.isatty() or console.input("  确定还要发送吗？输入 y 发送，其他键取消 > ").strip().lower() != "y":
             console.print("  已取消，什么都没发送。")
             return 1
@@ -156,12 +156,12 @@ def run_ai(cfg: Config, instruction: str, attachments: list) -> int:
         conv = Conversation(Client(cfg), books, store.load_archive(), instruction, now_minute(), attachments)
         while True:
             busy = "AI 正在看图…" if any(a.kind == "image" for a in attachments) else "AI 思考中…"
-            with console.status(f"[dim]{busy}[/]", spinner="dots"):
+            with console.status(f"[jk.muted]{busy}[/]", spinner="dots"):
                 result = conv.step()
             if not result.ask:
                 break
             if not sys.stdin.isatty():
-                err.print(f"[yellow]AI 需要你确认[/]：{result.ask['question']} {' / '.join(result.ask['options'])}")
+                err.print(f"[jk.doing]AI 需要你确认[/]：{result.ask['question']} {' / '.join(result.ask['options'])}")
                 err.print("请把话说得更具体一些再试一次。")
                 return 3
             answer = ask_user(result.ask["question"], result.ask["options"])
@@ -170,7 +170,7 @@ def run_ai(cfg: Config, instruction: str, attachments: list) -> int:
                 return 0
             conv.answer(answer)
     except AIError as exc:
-        err.print(f"[red]✖[/] {escape(str(exc))}")
+        err.print(f"[jk.error]✖[/] {escape(str(exc))}")
         return 1
     if result.ops:
         label = " ".join([instruction] + [f"[{att.describe()}]" for att in attachments]).strip()
@@ -184,7 +184,7 @@ def run_ai(cfg: Config, instruction: str, attachments: list) -> int:
         console.print(f"  [bold]{escape(result.reply)}[/]")
     print_changes(changes)
     if changes:
-        console.print("  [dim]改错了？用 jk undo 撤销[/]")
+        console.print("  [jk.muted]改错了？用 jk undo 撤销[/]")
         render_list(console, books)
     return 0
 
@@ -194,7 +194,7 @@ def cmd_undo(cfg: Config, args: list[str]) -> int:
     if label is None:
         console.print("  没有可以撤销的改动。")
         return 0
-    console.print(f"  [yellow]↶ 已撤销[/]：{label}")
+    console.print(f"  [jk.doing]↶ 已撤销[/]：{label}")
     return cmd_list(cfg, [])
 
 
@@ -202,7 +202,7 @@ def cmd_timeline(cfg: Config, args: list[str]) -> int:
     days = 7
     if args:
         if not args[0].isdigit() or int(args[0]) < 1:
-            err.print("[red]天数必须是正整数[/]，例：jk t 14")
+            err.print("[jk.error]天数必须是正整数[/]，例：jk t 14")
             return 2
         days = int(args[0])
     store, books = open_store(cfg)
@@ -233,18 +233,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     cfg = load_config()
     if ensure_env_file(cfg.home):
-        console.print(f"  [dim]已生成配置文件 {cfg.env_file}，用 AI 前请填入 JK_API_KEY。[/]")
+        console.print(f"  [jk.muted]已生成配置文件 {cfg.env_file}，用 AI 前请填入 JK_API_KEY。[/]")
     try:
         for msg in migrate.ensure(cfg.home):
-            console.print(f"  [yellow]{escape(msg)}[/]")
+            console.print(f"  [jk.doing]{escape(msg)}[/]")
     except migrate.FormatError as exc:
-        err.print(f"[red]✖[/] {escape(str(exc))}")
+        err.print(f"[jk.error]✖[/] {escape(str(exc))}")
         return 1
     if not argv:
         return cmd_list(cfg, [])
     handler = COMMANDS.get(argv[0])
     if handler is None:
-        err.print(f"[red]不认识的命令[/] {argv[0]}。想让 AI 处理请用：jk a {' '.join(argv)}")
+        err.print(f"[jk.error]不认识的命令[/] {argv[0]}。想让 AI 处理请用：jk a {' '.join(argv)}")
         return 2
     try:
         return handler(cfg, argv[1:])

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from rich.console import Console
+from jk.theme import make_console
 
 from jk.model import DOING, DONE, NOTE, Item, Notebook
 from jk.render import due_text, render_list, sort_key
@@ -29,13 +29,13 @@ def test_sort_order():
 
 
 def test_render_list_output():
-    console = Console(record=True, width=80)
+    console = make_console(record=True, width=80)
     render_list(console, [Notebook("作业", [Item(2, "作业 a", due="2026-10-14T15:00", pri=2), Item(1, "数值", state=DONE)])], NOW)
     out = console.export_text()
     assert "作业 [1/2]" in out and "2. ☐ 作业 a !" in out and "50% 完成" in out
 
 
 def test_render_empty_hint():
-    console = Console(record=True, width=80)
+    console = make_console(record=True, width=80)
     render_list(console, [], NOW)
     assert "jk a" in console.export_text()

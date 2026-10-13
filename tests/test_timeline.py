@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from rich.console import Console
+from jk.theme import make_console
 
 from jk.model import DONE, NOTE, Item, Notebook
 from jk.timeline import render_timeline
@@ -9,7 +9,7 @@ NOW = datetime(2026, 10, 13, 18, 0)
 
 
 def output(books, archive, days=7):
-    console = Console(record=True, width=100)
+    console = make_console(record=True, width=100)
     render_timeline(console, books, archive, days, NOW)
     return console.export_text()
 

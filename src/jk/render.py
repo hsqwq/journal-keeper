@@ -11,8 +11,8 @@ from rich.text import Text
 from .model import DOING, DONE, NOTE, Item, Notebook, due_datetime
 
 WEEKDAYS = "一二三四五六日"
-ICONS = {"todo": ("☐", "magenta"), DOING: ("…", "yellow"), DONE: ("✔", "green"), NOTE: ("●", "bright_white")}
-PRI_MARK = {2: ("!", "yellow"), 3: ("!!", "bold red")}
+ICONS = {"todo": ("☐", "jk.todo"), DOING: ("…", "jk.doing"), DONE: ("✔", "jk.done"), NOTE: ("●", "jk.note")}
+PRI_MARK = {2: ("!", "jk.pri2"), 3: ("!!", "jk.pri3")}
 
 
 def day_label(d: date, today: date) -> str:
@@ -45,11 +45,11 @@ def due_text(item: Item, now: datetime) -> Text:
     if len(item.due) > 10:
         label += when.strftime(" %H:%M")
     if item.state == DONE:
-        return Text(label, style="dim")
+        return Text(label, style="jk.muted")
     left = int((when - now).total_seconds() // 60)
     if left < 0:
-        return Text(f"{label} · 已逾期 {span(left)}", style="bold red")
-    style = "yellow" if left < 24 * 60 else "cyan"
+        return Text(f"{label} · 已逾期 {span(left)}", style="jk.overdue")
+    style = "jk.soon" if left < 24 * 60 else "jk.later"
     return Text(f"{label} · 还剩 {span(left)}", style=style)
 
 
@@ -66,16 +66,16 @@ def sort_key(item: Item) -> tuple:
 def item_row(item: Item, now: datetime) -> tuple[Text, Text, Text, Text]:
     key = NOTE if item.kind == NOTE else item.state
     icon, color = ICONS[key]
-    num = Text(f"{item.id}.", style="dim")
+    num = Text(f"{item.id}.", style="jk.muted")
     body = Text(item.text)
     if item.state == DONE and item.kind != NOTE:
-        body.stylize("dim strike")
+        body.stylize("jk.done_text")
     elif item.pri in PRI_MARK:
         mark, style = PRI_MARK[item.pri]
         body.stylize("bold")
         body.append(f" {mark}", style=style)
     if item.state == DOING and item.kind != NOTE:
-        body.append(" 进行中", style="yellow")
+        body.append(" 进行中", style="jk.doing")
     return num, Text(icon, style=color), body, due_text(item, now)
 
 
@@ -84,9 +84,9 @@ def notebook_header(nb: Notebook) -> Text:
     title = Text(f"  {nb.name}", style="bold underline")
     if tasks:
         done = sum(i.state == DONE for i in tasks)
-        title.append(f" [{done}/{len(tasks)}]", style="dim")
+        title.append(f" [{done}/{len(tasks)}]", style="jk.muted")
     else:
-        title.append(" [笔记]", style="dim")
+        title.append(" [笔记]", style="jk.muted")
     return title
 
 
@@ -94,7 +94,7 @@ def render_list(console: Console, books: list[Notebook], now: datetime | None = 
     now = now or datetime.now()
     books = [nb for nb in books if nb.items]
     if not books:
-        console.print("\n  [dim]还没有内容。试试：[/]jk a 明天下午三点前交作业 a\n")
+        console.print("\n  [jk.muted]还没有内容。试试：[/]jk a 明天下午三点前交作业 a\n")
         return
     console.print()
     for nb in books:
@@ -121,12 +121,12 @@ def summary(books: list[Notebook]) -> Text:
     pct = round(done * 100 / len(tasks)) if tasks else 0
     line = Text(f"  {pct}% 完成", style="bold")
     for count, label, style in (
-        (done, "完成", "green"),
-        (doing, "进行中", "yellow"),
-        (len(tasks) - done - doing, "待办", "magenta"),
-        (notes, "笔记", "bright_white"),
+        (done, "完成", "jk.done"),
+        (doing, "进行中", "jk.doing"),
+        (len(tasks) - done - doing, "待办", "jk.todo"),
+        (notes, "笔记", "jk.note"),
     ):
-        line.append(" · ", style="dim")
+        line.append(" · ", style="jk.muted")
         line.append(str(count), style=style)
-        line.append(f" {label}", style="dim")
+        line.append(f" {label}", style="jk.muted")
     return line
