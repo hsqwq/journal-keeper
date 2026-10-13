@@ -55,27 +55,16 @@ def due_text(item: Item, now: datetime) -> Text:
     return Text(f"{label} · 还剩 {span(left)}", style=style)
 
 
-def when_text(moment: datetime, all_day: bool, now: datetime) -> str:
-    """明天 16:00 / 周五 / 今天。"""
-    label = day_label(moment.date(), now.date())
-    return label if all_day else f"{label} {moment:%H:%M}"
-
-
 def recur_text(item: Item, now: datetime) -> Text:
-    """每周一 08:00 · 下次 周一 08:00（还剩 5天）。"""
+    """每周一 08:00 · 下次 周一。钟点已经在规则里，「下次」只写哪一天，保持短小、不挤占内容列。"""
     rule = parse_rule(item.every)
     text = Text(describe(rule), style="jk.muted")
     nxt = next_occurrence(rule, now)
     if nxt is None:
         return text
     text.append(" · 下次 ", style="jk.muted")
-    if rule.at:
-        left = int((nxt - now).total_seconds() // 60)
-        style = "jk.soon" if left < 24 * 60 else "jk.later"
-        text.append(f"{when_text(nxt, False, now)}（还剩 {span(left)}）", style=style)
-    else:
-        style = "jk.soon" if nxt.date() == now.date() else "jk.later"
-        text.append(when_text(nxt, True, now), style=style)
+    soon = (nxt - now).total_seconds() < 24 * 3600 if rule.at else nxt.date() == now.date()
+    text.append(day_label(nxt.date(), now.date()), style="jk.soon" if soon else "jk.later")
     return text
 
 

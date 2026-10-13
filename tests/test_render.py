@@ -56,8 +56,8 @@ def test_recur_group_on_top_with_next_time():
     render_list(console, books, NOW)  # NOW = 周二 18:00
     out = console.export_text()
     assert out.index("周期 [3 项]") < out.index("作业 [0/1]")
-    assert "↻ 上数值分析课" in out and "每周二、四 16:00 · 下次 后天 16:00（还剩 46小时）" in out
-    assert "每周一 08:00 · 下次 周一 08:00（还剩 5天）" in out
+    assert "↻ 上数值分析课" in out and "每周二、四 16:00 · 下次 后天" in out
+    assert "每周一 08:00 · 下次 周一" in out
     assert "每天 · 下次 今天" in out
     assert out.index("喝水") < out.index("上数值分析课") < out.index("跑步")  # 按下次时间排序
     assert "0% 完成" in out and "3 周期" in out
@@ -85,7 +85,7 @@ def test_times_right_aligned_across_notebooks():
     ]
     render_list(console, books, NOW)
     out = console.export_text()
-    ends = _ends(out, ["小时）", "还剩 13天", "15:00", "还剩 10天"])
+    ends = _ends(out, ["下次 明天", "还剩 13天", "15:00", "还剩 10天"])
     assert len(ends) == 1  # 所有时间的右边缘在同一列
     longest = next(line for line in out.splitlines() if "大数据" in line)
     assert longest.split("大数据与信息技术伦理案例")[1].startswith(" " * 4)  # 最长一条和时间之间也至少隔 GAP 格
@@ -99,3 +99,17 @@ def test_narrow_terminal_keeps_icons():
     out = console.export_text()
     assert "13. ↻ 开组会" in out
     assert all(len(line) <= 50 for line in out.splitlines())
+
+
+def test_long_recur_rule_does_not_squeeze_text():
+    from jk.model import RECUR
+
+    console = make_console(record=True, width=78)
+    books = [
+        Notebook("周期", [Item(9, "晨跑", kind=RECUR, every="weekly:1,3,5@07:00")]),
+        Notebook("课程", [Item(1, "提交操作系统实验报告", due="2026-10-16T18:00", pri=2)]),
+    ]
+    render_list(console, books, NOW)
+    lines = [l for l in console.export_text().splitlines() if l.strip()]
+    assert any("提交操作系统实验报告 !" in l for l in lines)  # 内容没被折成两行
+    assert any(l.rstrip().endswith("每周一、三、五 07:00 · 下次 明天") for l in lines)
