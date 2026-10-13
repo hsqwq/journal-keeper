@@ -157,3 +157,7 @@ jk a 帮我把记事本整理一下
 - [docs/ai-protocol.md](docs/ai-protocol.md) — AI 怎么工作、能做什么
 - [docs/development.md](docs/development.md) — 开发、测试、升级格式的步骤
 - [CHANGELOG.md](CHANGELOG.md) — 更新记录
+
+## 许可
+
+[MIT](LICENSE)

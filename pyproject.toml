@@ -3,6 +3,7 @@ name = "jk"
 version = "0.4.1"
 description = "Journal Keeper：由 AI 整理的终端记事本 / 任务日志"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     "rich>=13",
