@@ -18,8 +18,16 @@ from pathlib import Path
 from . import model
 from .store import atomic_write
 
+def _v1_to_v2(home: Path) -> None:
+    """v2 只新增了周期条目，旧内容不变：按新格式重写一遍，文件头更新为 jk_format: 2。"""
+    for sub in ("notebooks", "archive"):
+        for path in (home / sub).glob("*.md"):
+            nb = model.parse_notebook(path.read_text(encoding="utf-8"), path.stem)
+            atomic_write(path, nb.to_markdown())
+
+
 # 旧版本号 → 把数据目录从该版本升到下一版本的函数
-MIGRATIONS: dict[int, Callable[[Path], None]] = {}
+MIGRATIONS: dict[int, Callable[[Path], None]] = {1: _v1_to_v2}
 
 _BACKUP_ITEMS = ("notebooks", "archive", "jk.json", ".env")
 

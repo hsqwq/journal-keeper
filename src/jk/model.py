@@ -4,7 +4,7 @@
 
     - [ ] 完成作业 a <!-- jk id=2 due=2026-10-14T15:00 pri=2 created=2026-10-13T10:00 -->
 
-`[ ]` 待办、`[/]` 进行中、`[x]` 已完成；没有方框的是笔记。
+`[ ]` 待办、`[/]` 进行中、`[x]` 已完成；没有方框的是笔记；`↻` 开头的是周期（every= 存规则）。
 格式细节见 docs/data-format.md。
 """
 
@@ -14,9 +14,12 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2  # v2：新增周期条目（every=）
 
-TASK, NOTE = "task", "note"
+TASK, NOTE, RECUR = "task", "note", "recur"
+KINDS = (TASK, NOTE, RECUR)
+RECUR_BOOK = "周期"  # 周期条目统一放在这个记事本里
+RECUR_MARK = "↻ "
 TODO, DOING, DONE = "todo", "doing", "done"
 STATES = (TODO, DOING, DONE)
 BOX = {TODO: " ", DOING: "/", DONE: "x"}
@@ -66,6 +69,7 @@ class Item:
     pri: int = 1
     created: str = ""
     done_at: str | None = None
+    every: str | None = None  # 周期规则，见 recur.py
 
     @property
     def is_task(self) -> bool:
@@ -85,7 +89,9 @@ class Item:
             meta.append(f"created={self.created}")
         if self.done_at:
             meta.append(f"done={self.done_at}")
-        box = f"[{BOX[self.state]}] " if self.is_task else ""
+        if self.every:
+            meta.append(f"every={self.every}")
+        box = f"[{BOX[self.state]}] " if self.is_task else RECUR_MARK if self.kind == RECUR else ""
         return f"- {box}{clean_text(self.text)} <!-- jk {' '.join(meta)} -->"
 
 
@@ -113,6 +119,15 @@ def parse_item(line: str) -> Item | None:
         item.due = parse_due(meta.get("due"))
     except ValueError:
         item.due = None
+    if box is None and item.text.startswith(RECUR_MARK.strip()):
+        from .recur import parse_rule
+
+        try:
+            item.every = str(parse_rule(meta.get("every", "")))
+            item.kind, item.due = RECUR, None
+            item.text = item.text[1:].strip() or item.text
+        except ValueError:
+            pass  # 规则缺失或写错：当普通笔记保留原文，不丢内容
     return item
 
 

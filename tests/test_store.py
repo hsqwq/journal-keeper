@@ -53,3 +53,14 @@ def test_save_removes_empty_and_renamed(store):
     a.name = "课程作业"
     store.save([a])
     assert [p.name for p in store.notebooks_dir.iterdir()] == ["课程作业.md"]
+
+
+def test_recur_roundtrip_and_bad_rule_kept_as_note():
+    from jk.model import RECUR
+
+    it = Item(id=6, text="跑步", kind=RECUR, every="weekly:1@08:00", created="2026-10-13T10:00")
+    line = it.to_line()
+    assert line.startswith("- ↻ 跑步 <!-- jk id=6")
+    assert parse_item(line) == it
+    hand = parse_item("- ↻ 跑步 <!-- jk id=6 every=yearly -->")
+    assert hand.kind == NOTE and hand.text == "↻ 跑步"  # 规则坏了不丢内容
