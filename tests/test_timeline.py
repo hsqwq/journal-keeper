@@ -53,3 +53,19 @@ def test_recur_expanded_in_upcoming():
     assert upcoming.count("↻ 喝水") == 7 and "全天" in upcoming
     overdue = upcoming.split("⚠ 已逾期")[1].split("10-13")[0]
     assert "交报销单" in overdue and "喝水" not in overdue  # 今天的全天周期不算逾期
+
+
+def test_recur_row_only_icon_is_colored():
+    from jk.model import RECUR
+    from jk.theme import THEME
+
+    console = make_console(record=True, width=100)
+    render_timeline(console, [Notebook("周期", [Item(6, "跑步", kind=RECUR, every="daily")])], [], 1, NOW)
+    html = console.export_html(inline_styles=True)
+    orange = THEME.styles["jk.recur"].color.triplet.hex
+    # 橙色只出现在 ↻ 上，「跑步」不应该被染成橙色
+    assert f'color: {orange}' in html
+    import re
+
+    orange_spans = re.findall(rf'<span style="[^"]*{orange}[^"]*">([^<]*)</span>', html)
+    assert orange_spans and all("跑步" not in text for text in orange_spans)
