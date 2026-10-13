@@ -7,7 +7,7 @@ import sys
 from rich.console import Console
 from rich.markup import escape
 
-from . import __version__, history
+from . import __version__, history, migrate
 from .ai import AIError, Client, Conversation
 from .archive import auto_archive
 from .config import Config, ensure_env_file, load_config
@@ -203,6 +203,12 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_config()
     if ensure_env_file(cfg.home):
         console.print(f"  [dim]已生成配置文件 {cfg.env_file}，用 AI 前请填入 JK_API_KEY。[/]")
+    try:
+        for msg in migrate.ensure(cfg.home):
+            console.print(f"  [yellow]{escape(msg)}[/]")
+    except migrate.FormatError as exc:
+        err.print(f"[red]✖[/] {escape(str(exc))}")
+        return 1
     if not argv:
         return cmd_list(cfg, [])
     handler = COMMANDS.get(argv[0])
