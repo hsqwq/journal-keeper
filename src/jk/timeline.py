@@ -33,7 +33,7 @@ def render_timeline(console: Console, books: list[Notebook], archive: list[Noteb
             for it in nb.items:
                 num = "" if archived else f"{it.id}."
                 if it.created and it.created[:10] >= since:
-                    verb = Text("● 记录", style="blue") if it.kind == NOTE else Text("＋ 新建", style="cyan")
+                    verb = Text("● 记录", style="bright_white") if it.kind == NOTE else Text("＋ 新建", style="cyan")
                     events[it.created[:10]].append((it.created[11:16], num, verb, f"{it.text}  [{nb.name}]"))
                 if it.kind != NOTE and it.done_at and it.done_at[:10] >= since:
                     events[it.done_at[:10]].append((it.done_at[11:16], num, Text("✔ 完成", style="green"), f"{it.text}  [{nb.name}]"))

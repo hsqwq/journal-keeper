@@ -86,7 +86,7 @@ CHANGE_STYLE = {
     "undone": ("☐ 取消完成", "magenta"),
     "update": ("✎ 修改", "yellow"),
     "delete": ("✖ 删除", "red"),
-    "rename": ("⇄ 记事本", "blue"),
+    "rename": ("⇄ 记事本", "bright_white"),
 }
 
 

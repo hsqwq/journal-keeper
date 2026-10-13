@@ -11,7 +11,7 @@ from rich.text import Text
 from .model import DOING, DONE, NOTE, Item, Notebook, due_datetime
 
 WEEKDAYS = "一二三四五六日"
-ICONS = {"todo": ("☐", "magenta"), DOING: ("…", "yellow"), DONE: ("✔", "green"), NOTE: ("●", "blue")}
+ICONS = {"todo": ("☐", "magenta"), DOING: ("…", "yellow"), DONE: ("✔", "green"), NOTE: ("●", "bright_white")}
 PRI_MARK = {2: ("!", "yellow"), 3: ("!!", "bold red")}
 
 
@@ -124,7 +124,7 @@ def summary(books: list[Notebook]) -> Text:
         (done, "完成", "green"),
         (doing, "进行中", "yellow"),
         (len(tasks) - done - doing, "待办", "magenta"),
-        (notes, "笔记", "blue"),
+        (notes, "笔记", "bright_white"),
     ):
         line.append(" · ", style="dim")
         line.append(str(count), style=style)
