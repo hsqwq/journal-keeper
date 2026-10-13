@@ -50,10 +50,12 @@
 
 | op | 字段 | 说明 |
 | --- | --- | --- |
-| `add` | `notebook` `text` `kind`(task/note) `due` `priority`(1-3) `state` `allow_duplicate` | 新增；记事本不存在就新建 |
-| `update` | `id` + 任意：`text` `due`(null=清除) `priority` `state` `notebook` `kind` | 修改；改 `notebook` = 移动 |
+| `add` | `notebook` `text` `kind`(task/note/recur) `due` `priority`(1-3) `state` `every` `allow_duplicate` | 新增；记事本不存在就新建。`kind=recur` 必须有 `every`，记事本固定为「周期」，忽略 due/priority/state |
+| `update` | `id` + 任意：`text` `due`(null=清除) `priority` `state` `notebook` `kind` | 修改；改 `notebook` = 移动。周期条目只能改 `text` `every` |
 | `delete` | `id` | 删除（仍可 `jk undo`） |
 | `rename_notebook` | `from` `to` | 改名；`to` 已存在 = 合并 |
+
+周期的额外规则：任务/笔记不能改成周期（要删掉重建），普通条目不能放进「周期」记事本，「周期」记事本不能改名或合并。去重时周期条目要求规则完全相同才算重复。
 
 校验规则（`src/jk/ops.py`）：编号必须存在、记事本名 1-20 字、时间必须是规定格式、优先级只能 1/2/3、状态只能 todo/doing/done。
 
@@ -65,6 +67,7 @@
 - 只改你提到的条目；说「整理」才批量调整。
 - 多个可能或找不到 → 反问。
 - 纯提问 → 只回答，不改动。
+- 「每周/每天/工作日/每月X号」→ 周期；缺周几就反问；只发生一次的事仍是普通任务；不支持的规则（隔周、每年）只回复说明。
 
 ## 隐私
 

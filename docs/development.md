@@ -29,7 +29,8 @@ JK_HOME=/tmp/jk-test uv run jk   # 用临时数据目录试，不碰真实数据
 | `theme.py` | 配色（固定十六进制颜色，禁止用 magenta/cyan/dim 等调色板名，测试会检查） |
 | `render.py` | 列表视图 |
 | `timeline.py` | 时间线视图 |
-| `migrate.py` | 数据格式版本与迁移 |
+| `migrate.py` | 数据格式版本与迁移（`MIGRATIONS` 里登记每一级升级） |
+| `recur.py` | 周期规则解析、下次时间、给人看的描述 |
 
 ## 改数据格式的步骤
 
