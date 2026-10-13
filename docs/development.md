@@ -23,7 +23,9 @@ JK_HOME=/tmp/jk-test uv run jk   # 用临时数据目录试，不碰真实数据
 | `history.py` | 快照与撤销 |
 | `archive.py` | 自动归档 |
 | `ops.py` | AI 改动清单的校验与执行 |
-| `ai.py` | 提示词、调用 DeepSeek、反问与纠错循环 |
+| `ai.py` | 提示词、调用 DeepSeek、反问与纠错循环、多模态消息 |
+| `attach.py` | 读剪贴板、图片识别、疑似密钥检测 |
+| `compose.py` | `jk a` 输入框（prompt_toolkit），粘贴占位符 |
 | `render.py` | 列表视图 |
 | `timeline.py` | 时间线视图 |
 | `migrate.py` | 数据格式版本与迁移 |

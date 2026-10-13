@@ -1,3 +1,3 @@
 """Journal Keeper：由 AI 整理的终端记事本 / 任务日志。"""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

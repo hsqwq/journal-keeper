@@ -1,7 +1,7 @@
 # agent-log
 
 ## 状态
-STATE: jk-v0.1.0 | L2-F | 首版完成 | confirm=已问 | gates=pytest 53 passed | last_errpath=—
+STATE: jk-v0.2.0 | L2-S | 粘贴输入框完成 | confirm=已问 | gates=pytest 84 passed | last_errpath=冒烟测试误把剪贴板密钥发给 DeepSeek
 - 待办：用真实 DeepSeek Key 跑一轮 `jk a` 实测并据此调提示词。
 
 ## 决策（2026-10-13，用户确认）
@@ -12,4 +12,4 @@ STATE: jk-v0.1.0 | L2-F | 首版完成 | confirm=已问 | gates=pytest 53 passed
 - 提交不加 AI 署名（Nexus 规范 commit-message-convention 禁止）。
 
 ## 教训
-（暂无）
+- 2026-10-13 18:15 冒烟测试 `jk p` 读到剪贴板里的 API Key 并发给了 DeepSeek（只读本机未落盘）。根因：发送前无密钥检查、测试直接用真实剪贴板。已加 looks_secret 拦截；以后冒烟测试用临时 JK_HOME 和假剪贴板。
