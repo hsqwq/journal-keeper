@@ -1,1 +1,112 @@
 # jk — Journal Keeper
+
+AI 帮你整理的终端记事本 / 任务日志。你只管说一句话，jk 负责记下、归类、排好。
+
+```
+  作业 [1/4]
+    5. ☐ 交报销单 !!         昨天 · 已逾期 17小时
+    2. ☐ 作业 a !        明天 15:00 · 还剩 21小时
+    3. … 实验报告 进行中      10月20日 · 还剩 7天
+    1. ✔ 数值分析作业
+
+  想法 [笔记]
+    4. ● 试试用 rich 做界面
+
+  25% 完成 · 1 完成 · 1 进行中 · 2 待办 · 1 笔记
+```
+
+## 安装
+
+需要 [uv](https://docs.astral.sh/uv/)。
+
+```sh
+uv tool install -e ~/Projects/jk
+```
+
+## 配置
+
+第一次运行 `jk` 会生成 `~/.jk/.env`，打开填上 Key：
+
+```sh
+JK_API_KEY=sk-xxxx                      # 必填，DeepSeek API Key
+JK_BASE_URL=https://api.deepseek.com    # 请求地址
+JK_MODEL=deepseek-flash                 # 模型
+JK_ARCHIVE_AFTER_DAYS=1                 # 完成后几天归档；1=第二天，0=不归档
+JK_TIMEOUT=60                           # AI 超时（秒）
+```
+
+- Key 在 <https://platform.deepseek.com/api_keys> 创建。
+- 也认 `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`。
+- 终端里设置同名环境变量会覆盖 `.env`。
+- 想换数据目录：设置环境变量 `JK_HOME=/某个/目录`。
+
+## 用法
+
+| 命令 | 作用 |
+| --- | --- |
+| `jk` | 列出所有记事本 |
+| `jk a <一句话>` | 交给 AI 处理 |
+| `jk c <编号…>` | 标记完成；再按一次取消完成（不走 AI） |
+| `jk t [天数]` | 时间线：回顾最近几天 + 即将到期（默认 7 天） |
+| `jk undo` | 撤销上一次改动（可连续撤销，最多 50 步） |
+| `jk help` | 帮助 |
+
+### `jk a` 能听懂的话（举例）
+
+```sh
+jk a 有个任务，明天三点截止，要求我完成作业a
+jk a 任务2已完成
+jk a 作业a已经完成了
+jk a 实验报告开始做了
+jk a 报销单很急，改成今晚
+jk a 记一下：图书馆周六不开门
+jk a 明天要交什么
+jk a 帮我把记事本整理一下
+```
+
+- 一句话里可以有好几件事。
+- 对不上号时，AI 会反问并给编号选项：输入数字选，或直接打字回答，直接回车取消。
+- 改完会列出改了什么。改错了就 `jk undo`。
+
+### 图标
+
+| 图标 | 意思 |
+| --- | --- |
+| `☐` | 待办 |
+| `…` | 进行中 |
+| `✔` | 已完成 |
+| `●` | 笔记 |
+| `!` / `!!` | 重要 / 紧急 |
+
+截止时间：红色 = 已逾期，黄色 = 24 小时内，青色 = 更晚。
+
+## 数据在哪
+
+```
+~/.jk/
+  .env          配置（明文，权限 600）
+  jk.json       数据格式版本号
+  notebooks/    记事本，一本一个 .md
+  archive/      已归档的完成任务
+  history/      撤销用的快照
+  backups/      升级前的自动备份
+```
+
+记事本是普通 Markdown，可以用 Obsidian 或任何编辑器打开、手改。手写的 `- [ ] xxx` 会被自动收编。格式见 [docs/data-format.md](docs/data-format.md)。
+
+## 常见问题
+
+| 现象 | 处理 |
+| --- | --- |
+| 「还没配置 API Key」 | 在 `~/.jk/.env` 填 `JK_API_KEY=` |
+| 「API Key 无效」 | Key 填错或过期，去 DeepSeek 后台重建 |
+| 「找不到模型或地址」 | 检查 `JK_MODEL`、`JK_BASE_URL` |
+| 「数据格式比当前 jk 新」 | 你在用旧版 jk，先升级 |
+| 编号变了 | 完成的任务归档后，编号会让给新任务，保持编号短小 |
+
+## 文档
+
+- [docs/data-format.md](docs/data-format.md) — 数据格式与兼容承诺
+- [docs/ai-protocol.md](docs/ai-protocol.md) — AI 怎么工作、能做什么
+- [docs/development.md](docs/development.md) — 开发、测试、升级格式的步骤
+- [CHANGELOG.md](CHANGELOG.md) — 更新记录
