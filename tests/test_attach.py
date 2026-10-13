@@ -73,3 +73,26 @@ def test_clipboard_empty_and_missing_tool(monkeypatch):
     monkeypatch.delenv("DISPLAY", raising=False)
     with pytest.raises(AttachError, match="安装"):
         read_clipboard()
+
+
+@pytest.mark.parametrize("text", [
+    "sk-" + "a1b2c3d4" * 4,
+    "ghp_" + "A1b2" * 6,
+    "AKIA" + "ABCDEFGH12345678",
+    "数据库密码：hunter2",
+    "token = abc",
+    "-----BEGIN OPENSSH PRIVATE KEY-----",
+    "x9" * 15,
+])
+def test_looks_secret_hits(text):
+    assert attach.looks_secret(text)
+
+
+@pytest.mark.parametrize("text", [
+    "周五下午三点前交实验报告，地点 A-302",
+    "作业 a 截止 2026-10-14T15:00",
+    "见 https://example.com/course/2026/homework_assignment_week_07_final",
+    "数值分析作业 第 7 章 习题 1-24",
+])
+def test_looks_secret_misses_normal_text(text):
+    assert attach.looks_secret(text) is None

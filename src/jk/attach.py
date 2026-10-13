@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -132,3 +133,26 @@ def read_clipboard() -> Attachment:
             if text.strip():
                 return make_text(text, "剪贴板")
     raise AttachError("剪贴板是空的：先复制一段文字或截一张图")
+
+
+# ---------- 防误发密钥 ----------
+
+_SECRET_PATTERNS = (
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"), "私钥"),
+    (re.compile(r"\b(?:sk|pk|rk)-[A-Za-z0-9_\-]{16,}"), "API Key"),
+    (re.compile(r"\b(?:ghp|gho|github_pat|glpat|xox[abp])[_-][A-Za-z0-9_\-]{16,}"), "访问令牌"),
+    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "云服务密钥"),
+    (re.compile(r"(?i)(?:\b(?:password|passwd|api[_ ]?key|secret|token)|密码|口令)\s*[:=：]\s*\S+"), "密码"),
+)
+_LONG_TOKEN = re.compile(r"(?<![\w/.:%-])[A-Za-z0-9_\-]{24,}(?![\w/.%-])")
+
+
+def looks_secret(text: str) -> str | None:
+    """文字里像密钥 / 密码 → 返回类型名；否则 None。宁可多问一句，也不把密钥发出去。"""
+    for pattern, name in _SECRET_PATTERNS:
+        if pattern.search(text):
+            return name
+    for token in _LONG_TOKEN.findall(text):
+        if re.search(r"\d", token) and re.search(r"[A-Za-z]", token):
+            return "疑似密钥的长串字符"
+    return None

@@ -117,3 +117,93 @@ def test_jk_a_without_key(env, monkeypatch, capsys):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     assert cli.main(["a", "x"]) == 1
     assert "JK_API_KEY" in capsys.readouterr().err
+
+
+# ---------- 附件（粘贴文字 / 图片） ----------
+
+from jk import attach  # noqa: E402
+from jk.ai import user_content  # noqa: E402
+from jk.attach import Attachment  # noqa: E402
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 32
+
+
+def test_user_content_text_and_image():
+    text = Attachment(kind="text", text="周五交实验报告", source="剪贴板")
+    assert "周五交实验报告" in user_content("{}", "", [text])
+    assert "（没有说明）" in user_content("{}", "", [text])
+    img = Attachment(kind="image", data=PNG, mime="image/png", source="剪贴板")
+    parts = user_content("{}", "这是作业", [img])
+    assert parts[0]["type"] == "text" and "1 张图片" in parts[0]["text"]
+    assert parts[1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_jk_p_reads_clipboard(env, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "read_clipboard", lambda: Attachment(kind="text", text="周五交实验报告\n下周一交作业 b", source="剪贴板"))
+    fake = use_fake(monkeypatch, {"reply": "提取了 2 件事", "ops": [
+        {"op": "add", "notebook": "作业", "text": "交实验报告", "due": "2026-10-16"},
+        {"op": "add", "notebook": "作业", "text": "交作业 b", "due": "2026-10-19"},
+    ]})
+    assert cli.main(["p", "这是本周作业"]) == 0
+    out = capsys.readouterr().out
+    assert "已读取剪贴板：文字" in out and out.count("＋ 新增") == 2
+    sent = fake.seen[0][1]["content"]
+    assert "用户的话：这是本周作业" in sent and "下周一交作业 b" in sent
+
+
+def test_jk_p_empty_clipboard(env, monkeypatch, capsys):
+    def boom():
+        raise attach.AttachError("剪贴板是空的")
+    monkeypatch.setattr(cli, "read_clipboard", boom)
+    assert cli.main(["p"]) == 1
+    assert "剪贴板是空的" in capsys.readouterr().err
+
+
+def test_jk_a_with_image_path(env, monkeypatch, tmp_path, capsys):
+    img = tmp_path / "通知.png"
+    img.write_bytes(PNG)
+    fake = use_fake(monkeypatch, {"reply": "图里没有任务", "ops": []})
+    assert cli.main(["a", "看看", str(img), "有什么作业"]) == 0
+    first = fake.seen[0][1]["content"]
+    assert isinstance(first, list) and "用户的话：看看 有什么作业" in first[0]["text"]
+
+
+def test_json_mode_fallback_only_with_images(monkeypatch):
+    import openai
+
+    from jk.config import Config
+
+    calls = []
+
+    class Completions:
+        def create(self, **params):
+            calls.append(params)
+            if "response_format" in params:
+                exc = openai.BadRequestError.__new__(openai.BadRequestError)  # 绕开依赖具体 HTTP 库的构造函数
+                exc.status_code, exc.message = 400, "no json mode"
+                raise exc
+            return type("R", (), {"choices": [type("C", (), {"message": type("M", (), {"content": "{}"})()})()]})()
+
+    cfg = Config(home=None, api_key="k", base_url="http://x", model="m", archive_after_days=1, timeout=5)
+    client = ai.Client(cfg)
+    client._client = type("O", (), {"chat": type("Ch", (), {"completions": Completions()})()})()
+    with_image = [{"role": "user", "content": [{"type": "text", "text": "x"}]}]
+    assert client.complete(with_image) == "{}"
+    assert "response_format" not in calls[-1]
+    with pytest.raises(AIError, match="400"):
+        client.complete([{"role": "user", "content": "x"}])
+
+
+def test_secret_blocked_before_sending(env, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "read_clipboard", lambda: Attachment(kind="text", text="sk-" + "a1b2c3d4" * 4, source="剪贴板"))
+    fake = use_fake(monkeypatch)  # 没有预置回复：一旦调用 AI 就会报错
+    assert cli.main(["p"]) == 1
+    assert fake.seen == [] and "什么都没发送" in capsys.readouterr().out
+
+
+def test_secret_sent_only_after_yes(env, monkeypatch):
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(cli.console, "input", lambda prompt="": "y")
+    fake = use_fake(monkeypatch, {"reply": "好", "ops": []})
+    assert cli.main(["a", "我的密码：abc 记一下"]) == 0
+    assert len(fake.seen) == 1

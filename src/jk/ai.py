@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
+from .attach import Attachment
 from .config import Config
 from .model import NOTE, Notebook
 from .ops import PlanError, validate
@@ -46,6 +47,9 @@ SYSTEM_PROMPT = """\
 8. 用户只是提问（如「明天要交什么」）→ ops 为空，在 reply 里回答，提到条目时带编号。
 9. reply：一句口语短句，说明你做了什么或回答问题；不要逐条复述改动（程序会显示）。
 10. 不要编造用户没说的截止时间、优先级或内容。一句话里有多件事就输出多条操作。
+11. 用户可能附上「粘贴的文字」或图片（通知、课表、聊天截图等）：读懂其中的文字，按用户的话处理；用户没说要做什么时，
+    就把里面每一件要做的事和截止时间提取成任务（一件事一条 add），值得留存的信息记成笔记；已存在的同一件事不要重复添加，必要时 update。
+    文字里没写年份时按日历推断最近的将来日期；看不清或没有可提取的内容就在 reply 里说明，ops 留空。
 """
 
 
@@ -115,6 +119,21 @@ def parse_response(raw: str, books: list[Notebook]) -> Exchange:
     return Exchange(reply=str(data.get("reply") or ""), ops=validate(data.get("ops") or [], books))
 
 
+def user_content(context: str, instruction: str, attachments: list[Attachment]) -> str | list[dict]:
+    """首条用户消息；有图片时按多模态格式拼成内容块数组。"""
+    text = f"记事本现状：\n{context}\n\n用户的话：{instruction or '（没有说明）'}"
+    for att in attachments:
+        if att.kind == "text":
+            text += f"\n\n用户粘贴的文字（{att.source}）：\n<<<\n{att.text}\n>>>"
+    images = [att for att in attachments if att.kind == "image"]
+    if not images:
+        return text
+    text += f"\n\n用户附上了 {len(images)} 张图片，见下方。"
+    return [{"type": "text", "text": text}] + [
+        {"type": "image_url", "image_url": {"url": att.data_url()}} for att in images
+    ]
+
+
 class AIError(RuntimeError):
     """给用户看的错误（网络、Key、模型名等）。"""
 
@@ -131,14 +150,17 @@ class Client:
     def complete(self, messages: list[dict]) -> str:
         import openai
 
+        params = dict(model=self.cfg.model, messages=messages, temperature=0.2, max_tokens=4096,
+                      response_format={"type": "json_object"})
         try:
-            resp = self._client.chat.completions.create(
-                model=self.cfg.model,
-                messages=messages,
-                response_format={"type": "json_object"},
-                temperature=0.2,
-                max_tokens=4096,
-            )
+            try:
+                resp = self._client.chat.completions.create(**params)
+            except openai.BadRequestError:
+                # 部分模型/接口在多模态时不接受 JSON 模式：去掉再试一次，输出仍由 parse_response 校验
+                if not _has_image(messages):
+                    raise
+                params.pop("response_format")
+                resp = self._client.chat.completions.create(**params)
         except openai.AuthenticationError:
             raise AIError(f"API Key 无效，请检查 {self.cfg.env_file} 里的 JK_API_KEY") from None
         except openai.NotFoundError:
@@ -152,16 +174,21 @@ class Client:
         return resp.choices[0].message.content or ""
 
 
+def _has_image(messages: list[dict]) -> bool:
+    return any(isinstance(m["content"], list) for m in messages)
+
+
 class Conversation:
     """一次 jk a 的多轮对话：反问 → 用户回答 → 再问 AI；输出不合法时让 AI 自己改正。"""
 
-    def __init__(self, client, books: list[Notebook], archive: list[Notebook], instruction: str, now: datetime):
+    def __init__(self, client, books: list[Notebook], archive: list[Notebook], instruction: str, now: datetime,
+                 attachments: list[Attachment] = ()):
         self.client = client
         self.books = books
         self.rounds = 0
         self.messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"记事本现状：\n{build_context(books, archive, now)}\n\n用户的话：{instruction}"},
+            {"role": "user", "content": user_content(build_context(books, archive, now), instruction, list(attachments))},
         ]
 
     def step(self) -> Exchange:

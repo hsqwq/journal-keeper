@@ -8,6 +8,7 @@ from rich.console import Console
 from rich.markup import escape
 
 from . import __version__, history, migrate
+from .attach import AttachError, image_from_path, looks_secret, read_clipboard
 from .ai import AIError, Client, Conversation
 from .archive import auto_archive
 from .config import Config, ensure_env_file, load_config
@@ -24,7 +25,8 @@ HELP = """\
 [bold]jk[/] — Journal Keeper，AI 帮你整理的终端记事本
 
   [bold]jk[/]                 列出所有记事本
-  [bold]jk a[/] <一句话>      交给 AI 处理，例：jk a 明天三点前交作业 a
+  [bold]jk a[/] <一句话>      交给 AI 处理，例：jk a 明天三点前交作业 a（可带图片路径）
+  [bold]jk p[/] [说明]        把剪贴板里的文字或截图交给 AI，例：jk p 这是本周作业
   [bold]jk c[/] <编号…>       标记完成 / 取消完成（不走 AI），例：jk c 2 3
   [bold]jk t[/] [天数]        时间线：回顾最近几天 + 即将到期（默认 7 天）
   [bold]jk undo[/]            撤销上一次改动
@@ -114,19 +116,50 @@ def ask_user(question: str, options: list[str]) -> str | None:
 
 
 def cmd_ai(cfg: Config, args: list[str]) -> int:
-    instruction = " ".join(args).strip()
-    if not instruction:
+    attachments, words = [], []
+    try:
+        for arg in args:  # 参数里存在的图片文件当附件
+            image = image_from_path(arg)
+            (attachments if image else words).append(image or arg)
+    except AttachError as exc:
+        err.print(f"[red]✖[/] {escape(str(exc))}")
+        return 1
+    instruction = " ".join(words).strip()
+    if not instruction and not attachments:
         if not sys.stdin.isatty():
             err.print("[red]请写上要做的事[/]，例：jk a 明天三点前交作业 a")
             return 2
         instruction = console.input("  想做什么？> ").strip()
         if not instruction:
             return 0
+    return run_ai(cfg, instruction, attachments)
+
+
+def cmd_paste(cfg: Config, args: list[str]) -> int:
+    try:
+        attachment = read_clipboard()
+    except AttachError as exc:
+        err.print(f"[red]✖[/] {escape(str(exc))}")
+        return 1
+    return run_ai(cfg, " ".join(args).strip(), [attachment])
+
+
+def run_ai(cfg: Config, instruction: str, attachments: list) -> int:
+    for att in attachments:
+        console.print(f"  [dim]已读取{escape(att.describe())}[/]")
+    texts = [instruction] + [att.text for att in attachments if att.kind == "text"]
+    secret = looks_secret("\n".join(texts))
+    if secret:
+        err.print(f"  [bold red]![/] 内容里好像有{secret}，发给 AI 会泄露。")
+        if not sys.stdin.isatty() or console.input("  确定还要发送吗？输入 y 发送，其他键取消 > ").strip().lower() != "y":
+            console.print("  已取消，什么都没发送。")
+            return 1
     store, books = open_store(cfg)
     try:
-        conv = Conversation(Client(cfg), books, store.load_archive(), instruction, now_minute())
+        conv = Conversation(Client(cfg), books, store.load_archive(), instruction, now_minute(), attachments)
         while True:
-            with console.status("[dim]AI 思考中…[/]", spinner="dots"):
+            busy = "AI 正在看图…" if any(a.kind == "image" for a in attachments) else "AI 思考中…"
+            with console.status(f"[dim]{busy}[/]", spinner="dots"):
                 result = conv.step()
             if not result.ask:
                 break
@@ -143,7 +176,8 @@ def cmd_ai(cfg: Config, args: list[str]) -> int:
         err.print(f"[red]✖[/] {escape(str(exc))}")
         return 1
     if result.ops:
-        history.snapshot(store, f"jk a {instruction}")
+        label = " ".join([instruction] + [f"[{att.describe()}]" for att in attachments]).strip()
+        history.snapshot(store, f"jk a {label}")
         changes = apply(result.ops, books)
         store.save(books)
     else:
@@ -186,6 +220,7 @@ def cmd_help(cfg: Config, args: list[str]) -> int:
 
 COMMANDS = {
     "a": cmd_ai,
+    "p": cmd_paste,
     "c": cmd_check,
     "t": cmd_timeline,
     "undo": cmd_undo,
