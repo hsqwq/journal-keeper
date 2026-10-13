@@ -221,3 +221,23 @@ def test_unwritable_home_friendly_error(tmp_path, monkeypatch, capsys):
         home.chmod(0o700)
     msg = capsys.readouterr().err
     assert "读写文件失败" in msg and "Traceback" not in msg
+
+
+# ---------- 周期 ----------
+
+def test_context_includes_recur_next():
+    from jk.model import RECUR
+
+    bs = [Notebook("周期", [Item(6, "跑步", kind=RECUR, every="weekly:1@08:00")])]
+    row = json.loads(build_context(bs, [], NOW))["记事本"][0]["items"][0]
+    assert row == {"id": 6, "kind": "recur", "text": "跑步", "every": "weekly:1@08:00", "next": "2026-10-19T08:00"}
+
+
+def test_jk_a_adds_recur_and_jk_c_refuses(env, monkeypatch, capsys):
+    use_fake(monkeypatch, {"reply": "好", "ops": [{"op": "add", "kind": "recur", "text": "跑步", "every": "weekly:1@08:00"}]})
+    assert cli.main(["a", "每周一早上八点跑步"]) == 0
+    out = capsys.readouterr().out
+    assert "＋ 新增 1. 跑步" in out and "每周一 08:00" in out
+    assert "- ↻ 跑步" in (env / "notebooks" / "周期.md").read_text()
+    assert cli.main(["c", "1"]) == 1
+    assert "周期条目" in capsys.readouterr().err

@@ -8,7 +8,8 @@ from datetime import datetime, timedelta
 
 from .attach import Attachment
 from .config import Config
-from .model import NOTE, Notebook
+from .model import NOTE, RECUR, Notebook, fmt_dt
+from .recur import next_occurrence, parse_rule
 from .ops import ARCHIVE_LOOKBACK_DAYS, PlanError, validate, validate_skipped
 from .render import WEEKDAYS
 
@@ -29,8 +30,12 @@ SYSTEM_PROMPT = """\
 - 新增：{"op": "add", "notebook": "作业", "kind": "task", "text": "完成作业 a", "due": "2026-10-14T15:00", "priority": 1}
   kind 为 task（要做的事）或 note（信息、想法、记录）；due 可为 null；priority 默认 1；可选 "state": "doing"/"done"。
   只有用户明确要求「再加一个一样的」时才写 "allow_duplicate": true，否则程序会拦下和已有条目重复的新增。
+- 新增周期：{"op": "add", "kind": "recur", "text": "跑步", "every": "weekly:1@08:00"}
+  every 规则：daily（每天）、weekdays（工作日，周一到周五）、weekly:1,3（每周一、三；1=周一 … 7=周日）、monthly:15（每月 15 号），
+  需要钟点就加 @HH:MM，例：weekdays@07:30、weekly:2,4@16:00；没说钟点就不写（全天）。周期条目不需要 notebook、due、priority、state。
 - 修改：{"op": "update", "id": 2, ...只写要改的字段...}
-  可改字段：text、due（写 null 表示去掉截止）、priority、state（todo/doing/done）、notebook（移到别的记事本）、kind。
+  可改字段：text、due（写 null 表示去掉截止）、priority、state（todo/doing/done）、notebook（移到别的记事本）、kind（task/note）。
+  周期条目只能改 text 和 every。
 - 删除：{"op": "delete", "id": 3}（仅当用户明确要删除/不要了/取消这件事；「做完了」是 state=done，不是删除）
 - 记事本改名或合并：{"op": "rename_notebook", "from": "旧名", "to": "新名"}（新名已存在即合并）
 
@@ -56,6 +61,12 @@ SYSTEM_PROMPT = """\
     - 是同一件事且没有新信息 → 不要 add，写进 skipped：{"id": 原编号, "reason": "已有，截止时间相同"}。reason 只写客观依据，不要编造记录时间。
     - 和最近归档里已完成的同一件事 → 不要 add，在 reply 里说一声。
     - 截止时间不同的同名事（如每周的周报）是不同的事，可以 add。
+13. 周期：用户说「每天/每周X/工作日/每月X号 + 做某事」这类会重复发生的事（上课、跑步、例会、交房租）→ add kind=recur，不要拆成多条任务。
+    - 缺少周几或几号（如「每周下午四点上课」）→ 用 ask 反问是哪几天，options 给出可以直接执行的回答，如「每周一 16:00」「每周三 16:00」「每周一、三 16:00」。
+    - 只说「上午/下午/晚上」没有钟点 → 不写钟点（全天），不要编造。
+    - 改时间/改天 → update every；「不跑了/这门课结课了/取消例会」→ delete。周期条目没有「完成」，不要给它设 state。
+    - 每两周、单双周、每年等不支持的规则 → ops 留空，在 reply 里说明目前只支持每天/工作日/每周几/每月几号。
+    - 只发生一次的事（如「下周一八点跑步」）是普通任务，不是周期。
 """
 
 
@@ -80,7 +91,12 @@ def build_context(books: list[Notebook], archive: list[Notebook], now: datetime)
         items = []
         for it in nb.items:
             row: dict = {"id": it.id, "kind": it.kind, "text": it.text}
-            if it.kind != NOTE:
+            if it.kind == RECUR:
+                row["every"] = it.every
+                nxt = next_occurrence(parse_rule(it.every), now)
+                if nxt:
+                    row["next"] = fmt_dt(nxt)
+            elif it.kind != NOTE:
                 row["state"] = it.state
                 if it.due:
                     row["due"] = it.due

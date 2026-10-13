@@ -12,7 +12,7 @@ from .compose import compose
 from .ai import AIError, Client, Conversation
 from .archive import auto_archive
 from .config import Config, ensure_env_file, load_config
-from .model import DONE, NOTE, TODO, fmt_dt, now_minute
+from .model import DONE, NOTE, RECUR, TODO, fmt_dt, now_minute
 from .ops import apply, dedupe, skipped_changes
 from .render import render_list
 from .store import Store, find_item
@@ -40,6 +40,8 @@ HELP = """\
   jk a 实验报告开始做了
   jk a 报销单很急，改到今晚
   jk a 记一下：图书馆周六不开门
+  jk a 每周一早上八点跑步
+  jk a 每周二、四下午四点上数值分析课
   jk a 明天要交什么
   jk a 这是课程通知 ~/图片/通知.png
   [jk.muted]AI 没听懂时会给编号选项，输数字选择；直接回车取消。[/]
@@ -49,7 +51,7 @@ HELP = """\
   [bold]回车[/]          发送          [bold]Ctrl+C[/]  取消
 
 [bold underline]图标[/]
-  [jk.todo]☐[/] 待办   [jk.doing]…[/] 进行中   [jk.done]✔[/] 完成   [jk.note]●[/] 笔记   [jk.pri2]![/] 重要   [jk.pri3]!![/] 紧急
+  [jk.todo]☐[/] 待办   [jk.doing]…[/] 进行中   [jk.done]✔[/] 完成   [jk.note]●[/] 笔记   [jk.recur]↻[/] 周期   [jk.pri2]![/] 重要   [jk.pri3]!![/] 紧急
   [jk.add]＋[/] 新增   [jk.update]✎[/] 修改   [jk.delete]✖[/] 删除   [jk.dup]≈[/] 已存在，没有重复添加
 
 [bold underline]文件[/]
@@ -84,11 +86,14 @@ def cmd_check(cfg: Config, args: list[str]) -> int:
     found = {i: find_item(books, i) for i in ids}
     missing = [str(i) for i, hit in found.items() if hit is None]
     notes = [str(i) for i, hit in found.items() if hit and hit[1].kind == NOTE]
-    if missing or notes:
+    recurs = [str(i) for i, hit in found.items() if hit and hit[1].kind == RECUR]
+    if missing or notes or recurs:
         if missing:
             err.print(f"[jk.error]找不到编号[/] {' '.join(missing)}")
         if notes:
             err.print(f"[jk.error]这些是笔记，不能标完成[/] {' '.join(notes)}")
+        if recurs:
+            err.print(f"[jk.error]这些是周期条目，不用标完成，到时间会自动跳到下一次[/] {' '.join(recurs)}")
         return 1
     history.snapshot(store, f"jk c {' '.join(args)}")
     now = fmt_dt(now_minute())
