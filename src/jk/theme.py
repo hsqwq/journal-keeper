@@ -16,6 +16,7 @@ PALETTE = {
     "done": "#7cff8d",         # 已完成 ✔（绿）
     "done_text": "#b4bcc8 strike",  # 已完成条目的文字
     "note": "bold #ffffff",    # 笔记 ●（亮白）
+    "recur": "bold #ffb86c",   # 周期 ↻（橙）
     "pri2": "bold #ffe066",    # 重要 !
     "pri3": "bold #ff739e",    # 紧急 !!
     "overdue": "bold #ff739e", # 已逾期

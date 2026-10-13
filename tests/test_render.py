@@ -39,3 +39,25 @@ def test_render_empty_hint():
     console = make_console(record=True, width=80)
     render_list(console, [], NOW)
     assert "jk a" in console.export_text()
+
+
+def test_recur_group_on_top_with_next_time():
+    from jk.model import RECUR
+
+    console = make_console(record=True, width=100)
+    books = [
+        Notebook("作业", [Item(2, "作业 a")]),
+        Notebook("周期", [
+            Item(7, "上数值分析课", kind=RECUR, every="weekly:2,4@16:00"),
+            Item(6, "跑步", kind=RECUR, every="weekly:1@08:00"),
+            Item(8, "喝水", kind=RECUR, every="daily"),
+        ]),
+    ]
+    render_list(console, books, NOW)  # NOW = 周二 18:00
+    out = console.export_text()
+    assert out.index("周期 [3 项]") < out.index("作业 [0/1]")
+    assert "↻ 上数值分析课" in out and "每周二、四 16:00 · 下次 后天 16:00（还剩 46小时）" in out
+    assert "每周一 08:00 · 下次 周一 08:00（还剩 5天）" in out
+    assert "每天 · 下次 今天" in out
+    assert out.index("喝水") < out.index("上数值分析课") < out.index("跑步")  # 按下次时间排序
+    assert "0% 完成" in out and "3 周期" in out
