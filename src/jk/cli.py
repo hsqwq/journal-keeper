@@ -1,4 +1,4 @@
-"""命令行入口：jk / jk a / jk c / jk t / jk undo。"""
+"""命令行入口：jk / jk a / jk c / jk t / jk undo / jk h。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from .ai import AIError, Client, Conversation
 from .archive import auto_archive
 from .config import Config, ensure_env_file, load_config
 from .model import DONE, NOTE, TODO, fmt_dt, now_minute
-from .ops import apply
+from .ops import apply, dedupe, skipped_changes
 from .render import render_list
 from .store import Store, find_item
 from .theme import make_console
@@ -23,17 +23,38 @@ console = make_console()
 err = make_console(stderr=True)
 
 HELP = """\
-[bold]jk[/] — Journal Keeper，AI 帮你整理的终端记事本
+[bold]jk[/] — Journal Keeper · AI 帮你整理的终端记事本
 
-  [bold]jk[/]                 列出所有记事本
-  [bold]jk a[/] <一句话>      交给 AI 处理，例：jk a 明天三点前交作业 a（可带图片路径）
-  [bold]jk a[/]               打开输入框：Ctrl+Shift+V 粘文字，Ctrl+V 粘截图
-  [bold]jk c[/] <编号…>       标记完成 / 取消完成（不走 AI），例：jk c 2 3
-  [bold]jk t[/] [天数]        时间线：回顾最近几天 + 即将到期（默认 7 天）
-  [bold]jk undo[/]            撤销上一次改动
+[bold underline]常用命令[/]
+  [bold]jk[/]                看全部记事本
+  [bold]jk a[/] 一句话       交给 AI：新增、完成、修改、删除、提问都行
+  [bold]jk a[/]              打开输入框，可以粘贴大段文字和截图
+  [bold]jk c[/] 2 3          把 2 号、3 号标成完成（再输一次就取消）
+  [bold]jk t[/] [天数]       时间线：最近做了什么 + 快到期的（默认 7 天）
+  [bold]jk undo[/]           撤销上一次改动（可以连续撤销）
+  [bold]jk h[/]              显示这个帮助
 
-  数据目录：{home}
-  配置文件：{home}/.env
+[bold underline]跟 AI 说话的例子[/]
+  jk a 有个任务，明天三点截止，要完成作业a
+  jk a 任务2做完了
+  jk a 实验报告开始做了
+  jk a 报销单很急，改到今晚
+  jk a 记一下：图书馆周六不开门
+  jk a 明天要交什么
+  jk a 这是课程通知 ~/图片/通知.png
+  [jk.muted]AI 没听懂时会给编号选项，输数字选择；直接回车取消。[/]
+
+[bold underline]输入框按键[/]（敲 jk a 回车后）
+  [bold]Ctrl+Shift+V[/]  粘贴文字      [bold]Ctrl+V[/]  粘贴截图
+  [bold]回车[/]          发送          [bold]Ctrl+C[/]  取消
+
+[bold underline]图标[/]
+  [jk.todo]☐[/] 待办   [jk.doing]…[/] 进行中   [jk.done]✔[/] 完成   [jk.note]●[/] 笔记   [jk.pri2]![/] 重要   [jk.pri3]!![/] 紧急
+  [jk.add]＋[/] 新增   [jk.update]✎[/] 修改   [jk.delete]✖[/] 删除   [jk.dup]≈[/] 已存在，没有重复添加
+
+[bold underline]文件[/]
+  记事本  {home}/notebooks/
+  配置    {home}/.env  [jk.muted]（在这里填 JK_API_KEY）[/]
 """
 
 
@@ -90,6 +111,7 @@ CHANGE_STYLE = {
     "update": ("✎ 修改", "jk.update"),
     "delete": ("✖ 删除", "jk.delete"),
     "rename": ("⇄ 记事本", "jk.note"),
+    "dup": ("≈ 已存在", "jk.dup"),
 }
 
 
@@ -152,8 +174,9 @@ def run_ai(cfg: Config, instruction: str, attachments: list) -> int:
             console.print("  已取消，什么都没发送。")
             return 1
     store, books = open_store(cfg)
+    archive = store.load_archive()
     try:
-        conv = Conversation(Client(cfg), books, store.load_archive(), instruction, now_minute(), attachments)
+        conv = Conversation(Client(cfg), books, archive, instruction, now_minute(), attachments)
         while True:
             busy = "AI 正在看图…" if any(a.kind == "image" for a in attachments) else "AI 思考中…"
             with console.status(f"[jk.muted]{busy}[/]", spinner="dots"):
@@ -172,17 +195,18 @@ def run_ai(cfg: Config, instruction: str, attachments: list) -> int:
     except AIError as exc:
         err.print(f"[jk.error]✖[/] {escape(str(exc))}")
         return 1
-    if result.ops:
+    skipped = skipped_changes(result.skipped, books)
+    ops, dups = dedupe(result.ops, books, archive, now_minute())
+    changes = []
+    if ops:
         label = " ".join([instruction] + [f"[{att.describe()}]" for att in attachments]).strip()
         history.snapshot(store, f"jk a {label}")
-        changes = apply(result.ops, books)
+        changes = apply(ops, books)
         store.save(books)
-    else:
-        changes = []
     console.print()
     if result.reply:
         console.print(f"  [bold]{escape(result.reply)}[/]")
-    print_changes(changes)
+    print_changes(changes + skipped + dups)
     if changes:
         console.print("  [jk.muted]改错了？用 jk undo 撤销[/]")
         render_list(console, books)
@@ -220,6 +244,7 @@ COMMANDS = {
     "c": cmd_check,
     "t": cmd_timeline,
     "undo": cmd_undo,
+    "h": cmd_help,
     "help": cmd_help,
     "-h": cmd_help,
     "--help": cmd_help,
@@ -232,6 +257,20 @@ def main(argv: list[str] | None = None) -> int:
         console.print(f"jk {__version__}")
         return 0
     cfg = load_config()
+    try:
+        return _run(cfg, argv)
+    except KeyboardInterrupt:
+        err.print("\n  已取消，没有改动。")
+        return 130
+    except OSError as exc:
+        where = exc.filename or cfg.home
+        reason = exc.strerror or str(exc)
+        err.print(f"[jk.error]✖[/] 读写文件失败：{escape(str(where))}（{escape(reason)}）")
+        err.print(f"  请检查数据目录 {escape(str(cfg.home))} 是否存在、有没有写入权限；也可以用 JK_HOME 换一个目录。")
+        return 1
+
+
+def _run(cfg: Config, argv: list[str]) -> int:
     if ensure_env_file(cfg.home):
         console.print(f"  [jk.muted]已生成配置文件 {cfg.env_file}，用 AI 前请填入 JK_API_KEY。[/]")
     try:
@@ -244,10 +283,6 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_list(cfg, [])
     handler = COMMANDS.get(argv[0])
     if handler is None:
-        err.print(f"[jk.error]不认识的命令[/] {argv[0]}。想让 AI 处理请用：jk a {' '.join(argv)}")
+        err.print(f"[jk.error]不认识的命令[/] {escape(argv[0])}。想让 AI 处理请用：jk a {escape(' '.join(argv))}；查看帮助：jk h")
         return 2
-    try:
-        return handler(cfg, argv[1:])
-    except KeyboardInterrupt:
-        err.print("\n  已取消，没有改动。")
-        return 130
+    return handler(cfg, argv[1:])

@@ -186,3 +186,38 @@ def test_secret_sent_only_after_yes(env, monkeypatch):
     fake = use_fake(monkeypatch, {"reply": "好", "ops": []})
     assert cli.main(["a", "我的密码：abc 记一下"]) == 0
     assert len(fake.seen) == 1
+
+
+# ---------- 去重显示 / 帮助 / 文件错误 ----------
+
+def test_jk_a_shows_duplicates_and_skips_snapshot(env, monkeypatch, capsys):
+    use_fake(monkeypatch, {"reply": "", "ops": [{"op": "add", "notebook": "作业", "text": "交实验报告三"}]})
+    cli.main(["a", "x"])
+    capsys.readouterr()
+    use_fake(monkeypatch, {"reply": "图里都记过了", "skipped": [{"id": 1, "reason": "已经记过"}],
+                           "ops": [{"op": "add", "notebook": "作业", "text": "交实验报告三。"}]})
+    snaps_before = len(list((env / "history").iterdir()))
+    assert cli.main(["a", "y"]) == 0
+    out = capsys.readouterr().out
+    assert out.count("≈ 已存在") == 2 and "＋ 新增" not in out
+    assert len(list((env / "history").iterdir())) == snaps_before  # 没有真改动，不拍快照
+
+
+def test_jk_h_chinese_help(env, capsys):
+    assert cli.main(["h"]) == 0
+    out = capsys.readouterr().out
+    for word in ("常用命令", "跟 AI 说话的例子", "输入框按键", "图标", "jk undo", "JK_API_KEY"):
+        assert word in out
+
+
+def test_unwritable_home_friendly_error(tmp_path, monkeypatch, capsys):
+    home = tmp_path / "ro"
+    home.mkdir()
+    home.chmod(0o500)
+    monkeypatch.setenv("JK_HOME", str(home))
+    try:
+        assert cli.main([]) == 1
+    finally:
+        home.chmod(0o700)
+    msg = capsys.readouterr().err
+    assert "读写文件失败" in msg and "Traceback" not in msg
