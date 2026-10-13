@@ -23,6 +23,8 @@ _MAGIC = (
     (b"GIF89a", "image/gif"),
 )
 
+EXT = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"}
+
 
 class AttachError(RuntimeError):
     """给用户看的错误。"""

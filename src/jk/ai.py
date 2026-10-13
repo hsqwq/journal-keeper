@@ -129,9 +129,11 @@ def user_content(context: str, instruction: str, attachments: list[Attachment]) 
     if not images:
         return text
     text += f"\n\n用户附上了 {len(images)} 张图片，见下方。"
-    return [{"type": "text", "text": text}] + [
-        {"type": "image_url", "image_url": {"url": att.data_url()}} for att in images
-    ]
+    parts: list[dict] = [{"type": "text", "text": text}]
+    for att in images:
+        parts.append({"type": "text", "text": f"[{att.source}]"})
+        parts.append({"type": "image_url", "image_url": {"url": att.data_url()}})
+    return parts
 
 
 class AIError(RuntimeError):

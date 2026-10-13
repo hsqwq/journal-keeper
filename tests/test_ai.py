@@ -135,28 +135,8 @@ def test_user_content_text_and_image():
     img = Attachment(kind="image", data=PNG, mime="image/png", source="剪贴板")
     parts = user_content("{}", "这是作业", [img])
     assert parts[0]["type"] == "text" and "1 张图片" in parts[0]["text"]
-    assert parts[1]["image_url"]["url"].startswith("data:image/png;base64,")
-
-
-def test_jk_p_reads_clipboard(env, monkeypatch, capsys):
-    monkeypatch.setattr(cli, "read_clipboard", lambda: Attachment(kind="text", text="周五交实验报告\n下周一交作业 b", source="剪贴板"))
-    fake = use_fake(monkeypatch, {"reply": "提取了 2 件事", "ops": [
-        {"op": "add", "notebook": "作业", "text": "交实验报告", "due": "2026-10-16"},
-        {"op": "add", "notebook": "作业", "text": "交作业 b", "due": "2026-10-19"},
-    ]})
-    assert cli.main(["p", "这是本周作业"]) == 0
-    out = capsys.readouterr().out
-    assert "已读取剪贴板：文字" in out and out.count("＋ 新增") == 2
-    sent = fake.seen[0][1]["content"]
-    assert "用户的话：这是本周作业" in sent and "下周一交作业 b" in sent
-
-
-def test_jk_p_empty_clipboard(env, monkeypatch, capsys):
-    def boom():
-        raise attach.AttachError("剪贴板是空的")
-    monkeypatch.setattr(cli, "read_clipboard", boom)
-    assert cli.main(["p"]) == 1
-    assert "剪贴板是空的" in capsys.readouterr().err
+    assert parts[1]["text"] == "[剪贴板]"
+    assert parts[2]["image_url"]["url"].startswith("data:image/png;base64,")
 
 
 def test_jk_a_with_image_path(env, monkeypatch, tmp_path, capsys):
@@ -195,9 +175,8 @@ def test_json_mode_fallback_only_with_images(monkeypatch):
 
 
 def test_secret_blocked_before_sending(env, monkeypatch, capsys):
-    monkeypatch.setattr(cli, "read_clipboard", lambda: Attachment(kind="text", text="sk-" + "a1b2c3d4" * 4, source="剪贴板"))
     fake = use_fake(monkeypatch)  # 没有预置回复：一旦调用 AI 就会报错
-    assert cli.main(["p"]) == 1
+    assert cli.main(["a", "记一下", "sk-" + "a1b2c3d4" * 4]) == 1
     assert fake.seen == [] and "什么都没发送" in capsys.readouterr().out
 
 
