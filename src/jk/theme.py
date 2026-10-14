@@ -28,6 +28,7 @@ PALETTE = {
     "dup": "#d8c8a8",          # ≈ 已存在（浅卡其）
     "error": "bold #ff739e",   # 错误
     "ask": "bold #ffe066",     # AI 反问
+    "match": "bold #101418 on #ffe066",  # 搜索命中的关键词（黄底深字）
 }
 
 THEME = Theme({f"jk.{name}": style for name, style in PALETTE.items()})

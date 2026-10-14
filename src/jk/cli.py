@@ -1,4 +1,4 @@
-"""命令行入口：jk / jk a / jk c / jk t / jk undo / jk h。"""
+"""命令行入口：jk [记事本] / jk a / jk c / jk t / jk s / jk undo / jk h。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from .archive import auto_archive
 from .config import Config, ensure_env_file, load_config
 from .model import DONE, NOTE, RECUR, TODO, fmt_dt, now_minute
 from .ops import apply, dedupe, skipped_changes
-from .render import render_list
+from .render import render_list, render_search
 from .store import Store, find_item
 from .theme import make_console
 from .timeline import render_timeline
@@ -27,10 +27,12 @@ HELP = """\
 
 [bold underline]常用命令[/]
   [bold]jk[/]                看全部记事本
+  [bold]jk[/] 作业            只看「作业」本（写一部分也行，可写多个）
   [bold]jk a[/] 一句话       交给 AI：新增、完成、修改、删除、提问都行
   [bold]jk a[/]              打开输入框，可以粘贴大段文字和截图
   [bold]jk c[/] 2 3          把 2 号、3 号标成完成（再输一次就取消）
   [bold]jk t[/] [天数]       时间线：最近做了什么 + 快到期的（默认 7 天）
+  [bold]jk s[/] 关键词        在全部记事本和归档里找（不走 AI）
   [bold]jk undo[/]           撤销上一次改动（可以连续撤销）
   [bold]jk h[/]              显示这个帮助
 
@@ -69,7 +71,37 @@ def open_store(cfg: Config) -> tuple[Store, list]:
 
 def cmd_list(cfg: Config, args: list[str]) -> int:
     _, books = open_store(cfg)
-    render_list(console, books)
+    if not args:
+        render_list(console, books)
+        return 0
+    picked = pick_notebooks(books, args)
+    if not picked:
+        names = "、".join(nb.name for nb in books) or "（还没有记事本）"
+        err.print(f"[jk.error]没有叫「{escape(' '.join(args))}」的记事本，也不是命令[/]")
+        err.print(f"  现有记事本：{escape(names)}")
+        err.print(f"  想让 AI 处理请用：jk a {escape(' '.join(args))}；查看帮助：jk h")
+        return 2
+    render_list(console, picked)
+    return 0
+
+
+def pick_notebooks(books: list, names: list[str]) -> list:
+    """按名字挑记事本：全名优先；否则名字里含这几个字就算（不分大小写），可以一次挑多本。"""
+    picked = []
+    for name in names:
+        exact = [nb for nb in books if nb.name == name]
+        hits = exact or [nb for nb in books if name.lower() in nb.name.lower()]
+        picked += [nb for nb in hits if nb not in picked]
+    return picked
+
+
+def cmd_search(cfg: Config, args: list[str]) -> int:
+    words = [w for w in args if w.strip()]
+    if not words:
+        err.print("[jk.error]请给出要找的字[/]，例：jk s 报告")
+        return 2
+    store, books = open_store(cfg)
+    render_search(console, books, store.load_archive(), words)
     return 0
 
 
@@ -248,6 +280,7 @@ COMMANDS = {
     "a": cmd_ai,
     "c": cmd_check,
     "t": cmd_timeline,
+    "s": cmd_search,
     "undo": cmd_undo,
     "h": cmd_help,
     "help": cmd_help,
@@ -287,7 +320,6 @@ def _run(cfg: Config, argv: list[str]) -> int:
     if not argv:
         return cmd_list(cfg, [])
     handler = COMMANDS.get(argv[0])
-    if handler is None:
-        err.print(f"[jk.error]不认识的命令[/] {escape(argv[0])}。想让 AI 处理请用：jk a {escape(' '.join(argv))}；查看帮助：jk h")
-        return 2
+    if handler is None:  # 不是命令就当记事本名：jk 作业
+        return cmd_list(cfg, argv)
     return handler(cfg, argv[1:])
