@@ -6,7 +6,7 @@ import sys
 
 from rich.markup import escape
 
-from . import __version__, history, migrate
+from . import __version__, complete, history, migrate
 from .attach import AttachError, image_from_path, looks_secret
 from .compose import compose
 from .ai import AIError, Client, Conversation
@@ -295,6 +295,14 @@ def main(argv: list[str] | None = None) -> int:
         console.print(f"jk {__version__}")
         return 0
     cfg = load_config()
+    if argv and argv[0] == "__complete":  # Tab 补全：只输出候选项，不做任何别的事
+        return complete.run(cfg, argv[1:])
+    if argv[:1] == ["completion"]:
+        if argv[1:] != ["zsh"]:
+            err.print("用法：jk completion zsh（目前只支持 zsh）")
+            return 2
+        sys.stdout.write(complete.ZSH_SCRIPT)
+        return 0
     try:
         return _run(cfg, argv)
     except KeyboardInterrupt:
@@ -309,6 +317,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run(cfg: Config, argv: list[str]) -> int:
+    complete.refresh_script(cfg)
     if ensure_env_file(cfg.home):
         console.print(f"  [jk.muted]已生成配置文件 {cfg.env_file}，用 AI 前请填入 JK_API_KEY。[/]")
     try:

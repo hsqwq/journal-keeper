@@ -26,6 +26,7 @@ JK_HOME=/tmp/jk-test uv run jk   # 用临时数据目录试，不碰真实数据
 | `ai.py` | 提示词、调用 DeepSeek、反问与纠错循环、多模态消息 |
 | `attach.py` | 读剪贴板、图片识别、疑似密钥检测 |
 | `compose.py` | `jk a` 输入框（prompt_toolkit），粘贴占位符 |
+| `complete.py` | zsh Tab 补全：`jk __complete` 输出候选项，`jk completion zsh` 输出补全脚本 |
 | `theme.py` | 配色（固定十六进制颜色，禁止用 magenta/cyan/dim 等调色板名，测试会检查） |
 | `render.py` | 列表视图 |
 | `timeline.py` | 时间线视图 |
