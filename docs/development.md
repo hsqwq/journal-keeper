@@ -31,6 +31,8 @@ JK_HOME=/tmp/jk-test uv run jk   # 用临时数据目录试，不碰真实数据
 | `render.py` | 列表视图 |
 | `timeline.py` | 时间线视图 |
 | `migrate.py` | 数据格式版本与迁移（`MIGRATIONS` 里登记每一级升级） |
+| `ucloud.py` | 北邮教学云平台登录与取待办（移植自 bupt-ucloud-todo，只用标准库） |
+| `sync.py` | `jk u` 的同步规则：按 `src` 对应、认领手记条目、完成状态以平台为准 |
 | `recur.py` | 周期规则解析、下次时间、给人看的描述 |
 
 ## 更新 README 截图
