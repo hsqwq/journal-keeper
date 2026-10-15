@@ -10,7 +10,7 @@ from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 
-from .model import DOING, DONE, NOTE, RECUR, RECUR_BOOK, Item, Notebook, due_datetime
+from .model import DOING, DONE, NOTE, PROGRAM_BOOKS, RECUR, RECUR_BOOK, Item, Notebook, due_datetime
 from .recur import describe, next_occurrence, parse_rule
 
 WEEKDAYS = "一二三四五六日"
@@ -167,9 +167,14 @@ def sorted_items(nb: Notebook, now: datetime) -> list[Item]:
     return sorted(nb.items, key=sort_key)
 
 
+def book_order(nb: Notebook) -> int:
+    """周期、云邮放最上面，其余保持原顺序（sorted 是稳定排序）。"""
+    return PROGRAM_BOOKS.index(nb.name) if nb.name in PROGRAM_BOOKS else len(PROGRAM_BOOKS)
+
+
 def render_list(console: Console, books: list[Notebook], now: datetime | None = None) -> None:
     now = now or datetime.now()
-    books = sorted((nb for nb in books if nb.items), key=lambda nb: nb.name != RECUR_BOOK)  # 周期放最上面
+    books = sorted((nb for nb in books if nb.items), key=book_order)
     if not books:
         console.print("\n  [jk.muted]还没有内容。试试：[/]jk a 明天下午三点前交作业 a\n")
         return
@@ -194,7 +199,7 @@ def render_search(console: Console, books: list[Notebook], archive: list[Noteboo
         return body
 
     groups = []
-    for nb in sorted(books, key=lambda nb: nb.name != RECUR_BOOK):
+    for nb in sorted(books, key=book_order):
         hits = [it for it in sorted_items(nb, now) if matches_words(it.text, words)]
         if hits:
             header = Text(f"  {nb.name}", style="bold underline")

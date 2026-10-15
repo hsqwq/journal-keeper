@@ -17,6 +17,8 @@ DEFAULTS = {
     "JK_MODEL": "deepseek-flash",
     "JK_ARCHIVE_AFTER_DAYS": "1",
     "JK_TIMEOUT": "60",
+    "UCLOUD_USERNAME": "",
+    "UCLOUD_PASSWORD": "",
 }
 
 # 旧键名 / 通用键名 → 当前键名。以后改名只在这里加一行，旧 .env 不用动。
@@ -37,6 +39,9 @@ JK_MODEL=deepseek-flash
 JK_ARCHIVE_AFTER_DAYS=1
 # AI 请求超时（秒）
 JK_TIMEOUT=60
+# 北邮教学云平台账号（jk u 同步待办用；只发给学校统一认证，不会发给 AI）
+UCLOUD_USERNAME=
+UCLOUD_PASSWORD=
 """
 
 
@@ -48,6 +53,8 @@ class Config:
     model: str
     archive_after_days: int
     timeout: float
+    ucloud_username: str = ""
+    ucloud_password: str = ""
 
     @property
     def env_file(self) -> Path:
@@ -95,4 +102,6 @@ def load_config() -> Config:
         model=merged["JK_MODEL"].strip(),
         archive_after_days=_int(merged["JK_ARCHIVE_AFTER_DAYS"], 1),
         timeout=float(_int(merged["JK_TIMEOUT"], 60) or 60),
+        ucloud_username=merged["UCLOUD_USERNAME"].strip(),
+        ucloud_password=merged["UCLOUD_PASSWORD"],  # 密码原样使用，不去空格（引号 dotenv 已处理）
     )
