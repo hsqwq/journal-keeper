@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 
-from .model import DONE, KINDS, NOTE, RECUR, RECUR_BOOK, STATES, TASK, Item, Notebook, clean_text, fmt_dt, now_minute, parse_due
+from .model import DONE, KINDS, NOTE, PROGRAM_BOOKS, RECUR, RECUR_BOOK, STATES, UCLOUD_BOOK, TASK, Item, Notebook, clean_text, fmt_dt, now_minute, parse_due
 from .recur import describe, parse_rule
 from .store import find_item, get_notebook, next_free_id
 
@@ -104,6 +104,8 @@ def validate(ops, books: list[Notebook]) -> list[dict]:
             notebook = _name(op.get("notebook"))
             if notebook == RECUR_BOOK:
                 raise PlanError(f"「{RECUR_BOOK}」记事本只放周期条目（kind=recur）")
+            if notebook == UCLOUD_BOOK:
+                raise PlanError(f"「{UCLOUD_BOOK}」记事本只放 jk u 从教学云平台同步来的待办，请放进别的记事本")
             state = op.get("state", "todo")
             if state not in STATES:
                 raise PlanError(f"state 只能是 {'/'.join(STATES)}：{state!r}")
@@ -155,8 +157,8 @@ def validate(ops, books: list[Notebook]) -> list[dict]:
                 clean["state"] = op["state"]
             if "notebook" in op:
                 clean["notebook"] = _name(op["notebook"])
-                if clean["notebook"] == RECUR_BOOK:
-                    raise PlanError(f"「{RECUR_BOOK}」记事本只放周期条目")
+                if clean["notebook"] in PROGRAM_BOOKS:
+                    raise PlanError(f"「{clean['notebook']}」记事本由程序管理，不能把条目移进去")
             if "kind" in op:
                 if _kind(op["kind"]) == RECUR:
                     raise PlanError("不能把任务或笔记改成周期；请 delete 后用 kind=recur 重新 add")
@@ -169,8 +171,9 @@ def validate(ops, books: list[Notebook]) -> list[dict]:
             if old not in names:
                 raise PlanError(f"记事本 {old!r} 不存在")
             new = _name(op.get("to"))
-            if RECUR_BOOK in (old, new):
-                raise PlanError(f"「{RECUR_BOOK}」记事本由程序管理，不能改名或合并")
+            for name in (old, new):
+                if name in PROGRAM_BOOKS:
+                    raise PlanError(f"「{name}」记事本由程序管理，不能改名或合并")
             names.discard(old)
             names.add(new)
             out.append({"op": "rename_notebook", "from": old, "to": new})

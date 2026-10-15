@@ -42,7 +42,10 @@ def test_update_recur_rule_and_text():
     ([{"op": "update", "id": 1, "due": "2026-10-14"}], "只能改 text 和 every"),
     ([{"op": "update", "id": 2, "every": "daily"}], "不是周期"),
     ([{"op": "update", "id": 2, "kind": "recur"}], "不能把任务"),
-    ([{"op": "update", "id": 2, "notebook": "周期"}], "只放周期"),
+    ([{"op": "update", "id": 2, "notebook": "周期"}], "程序管理"),
+    ([{"op": "update", "id": 2, "notebook": "云邮"}], "程序管理"),
+    ([{"op": "add", "notebook": "云邮", "text": "x"}], "jk u"),
+    ([{"op": "rename_notebook", "from": "作业", "to": "云邮"}], "程序管理"),
     ([{"op": "rename_notebook", "from": "周期", "to": "习惯"}], "程序管理"),
     ([{"op": "rename_notebook", "from": "作业", "to": "周期"}], "程序管理"),
 ])
