@@ -6,6 +6,7 @@ from datetime import date, datetime
 
 from rich.cells import cell_len
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 
@@ -144,30 +145,86 @@ def notebook_header(nb: Notebook) -> Text:
     return title
 
 
+def render_groups(console: Console, groups: list[tuple[Text, list[tuple]]]) -> None:
+    """画若干分组（标题 + 条目行），所有分组共用列宽，右侧时间对齐。行 = (编号, 图标, 内容, 时间)。"""
+    rows = [r for _, group in groups for r in group]
+    num_w = max(max(cell_len(r[0].plain) for r in rows) + 2, 5)  # 左边留 2 格缩进，和分组标题对齐
+    # 固定宽度：编号列 + 图标 1 格 + 编号↔图标、图标↔内容两处列间空格
+    widths = column_widths(console, rows, 2, 3, num_w + 1 + 2)
+    console.print()
+    for header, group in groups:
+        console.print(header)
+        grid = make_grid(widths, [{"justify": "right", "width": num_w}, {"width": 1}])
+        for num, icon, body, when in group:
+            grid.add_row(num, icon, body, "", when)
+        console.print(grid)
+        console.print()
+
+
+def sorted_items(nb: Notebook, now: datetime) -> list[Item]:
+    if nb.name == RECUR_BOOK:
+        return sorted(nb.items, key=lambda i: recur_key(i, now))
+    return sorted(nb.items, key=sort_key)
+
+
 def render_list(console: Console, books: list[Notebook], now: datetime | None = None) -> None:
     now = now or datetime.now()
     books = sorted((nb for nb in books if nb.items), key=lambda nb: nb.name != RECUR_BOOK)  # 周期放最上面
     if not books:
         console.print("\n  [jk.muted]还没有内容。试试：[/]jk a 明天下午三点前交作业 a\n")
         return
-    groups = []
-    for nb in books:
-        items = sorted(nb.items, key=lambda i: recur_key(i, now)) if nb.name == RECUR_BOOK else sorted(nb.items, key=sort_key)
-        groups.append((nb, [item_row(item, now) for item in items]))
-    num_w = max(cell_len(r[0].plain) for _, rows in groups for r in rows) + 2  # 左边留 2 格缩进，和分组标题对齐
-    num_w = max(num_w, 5)
-    # 固定宽度：编号列 + 图标 1 格 + 编号↔图标、图标↔内容两处列间空格
-    widths = column_widths(console, [r for _, rows in groups for r in rows], 2, 3, num_w + 1 + 2)
-    console.print()
-    for nb, rows in groups:
-        console.print(notebook_header(nb))
-        grid = make_grid(widths, [{"justify": "right", "width": num_w}, {"width": 1}])
-        for num, icon, body, when in rows:
-            grid.add_row(num, icon, body, "", when)
-        console.print(grid)
-        console.print()
+    render_groups(console, [(notebook_header(nb), [item_row(it, now) for it in sorted_items(nb, now)]) for nb in books])
     console.print(summary(books))
     console.print()
+
+
+def matches_words(text: str, words: list[str]) -> bool:
+    """每个关键词都要出现（不分大小写）。"""
+    low = text.lower()
+    return all(w.lower() in low for w in words)
+
+
+def render_search(console: Console, books: list[Notebook], archive: list[Notebook], words: list[str],
+                  now: datetime | None = None) -> int:
+    """在记事本和归档里找含全部关键词的条目，关键词高亮；返回找到的条数。"""
+    now = now or datetime.now()
+
+    def mark(body: Text) -> Text:
+        body.highlight_words(words, style="jk.match", case_sensitive=False)
+        return body
+
+    groups = []
+    for nb in sorted(books, key=lambda nb: nb.name != RECUR_BOOK):
+        hits = [it for it in sorted_items(nb, now) if matches_words(it.text, words)]
+        if hits:
+            header = Text(f"  {nb.name}", style="bold underline")
+            header.append(f" [{len(hits)} 条]", style="jk.muted")
+            rows = []
+            for it in hits:
+                num, icon, body, when = item_row(it, now)
+                rows.append((num, icon, mark(body), when))
+            groups.append((header, rows))
+    archived = [(nb, it) for nb in archive for it in nb.items if matches_words(it.text, words)]
+    archived.sort(key=lambda p: p[1].done_at or "", reverse=True)
+    if archived:
+        header = Text("  已归档", style="bold underline")
+        header.append(f" [{len(archived)} 条]", style="jk.muted")
+        rows = []
+        for nb, it in archived:
+            body = mark(Text(it.text, style="jk.muted"))
+            body.append(f"  [{nb.name}]", style="jk.muted")
+            done = it.done_at[:10] if it.done_at else ""
+            when = Text(f"{day_label(date.fromisoformat(done), now.date())} 完成" if done else "", style="jk.muted")
+            rows.append((Text(""), Text("✔", style="jk.done"), body, when))
+        groups.append((header, rows))
+    total = sum(len(rows) for _, rows in groups)
+    if not total:
+        console.print(f"\n  [jk.muted]没找到含「{escape(' '.join(words))}」的条目[/]\n")
+        return 0
+    render_groups(console, groups)
+    console.print(Text(f"  找到 {total} 条", style="bold"))
+    console.print()
+    return total
 
 
 def summary(books: list[Notebook]) -> Text:
