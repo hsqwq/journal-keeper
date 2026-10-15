@@ -47,6 +47,8 @@ JK_BASE_URL=https://api.deepseek.com    # 请求地址
 JK_MODEL=deepseek-flash                 # 模型
 JK_ARCHIVE_AFTER_DAYS=1                 # 完成后几天归档；1=第二天，0=不归档
 JK_TIMEOUT=60                           # AI 超时（秒）
+UCLOUD_USERNAME= / UCLOUD_PASSWORD=     # 北邮统一认证账号（jk u 用）
+JK_UCLOUD_AUTO=1                        # 每天第一次运行时自动同步云邮；0=关
 ```
 
 - Key 在 <https://platform.deepseek.com/api_keys> 创建。
@@ -104,6 +106,7 @@ UCLOUD_USERNAME=学号
 UCLOUD_PASSWORD=统一认证密码
 ```
 
+- **每天第一次运行 jk（除 `jk undo`）会自动同步**，只显示一行结果，然后照常显示。失败（断网、要验证码）时 1 小时内不再自动重试，最多等 10 秒。不想要就在 `.env` 写 `JK_UCLOUD_AUTO=0`。
 - 平台上的待办会进「云邮」分组，标题前带课程名，例：`〔编译原理与技术〕第二次作业`。
 - 不走 AI，按平台编号对应：同步多少次都不会重复；名称或截止改了会更新。
 - **完成状态以平台为准**：平台上没了就自动标完成；jk 里标了完成但平台上还挂着，会改回未完成（已归档的也会拿回来）。
@@ -163,6 +166,7 @@ UCLOUD_PASSWORD=统一认证密码
   history/      撤销用的快照
   pastes/       输入框里粘贴的内容（发送后立即删除）
   backups/      升级前的自动备份
+  state.json    运行状态（如今天是否已同步云邮），删掉无妨
 ```
 
 记事本是普通 Markdown，可以用 Obsidian 或任何编辑器打开、手改。手写的 `- [ ] xxx` 会被自动收编。格式见 [docs/data-format.md](docs/data-format.md)。

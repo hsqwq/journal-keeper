@@ -6,7 +6,7 @@ import sys
 
 from rich.markup import escape
 
-from . import __version__, complete, history, migrate, sync, ucloud
+from . import __version__, autosync, complete, history, migrate, sync, ucloud
 from .attach import AttachError, image_from_path, looks_secret
 from .compose import compose
 from .ai import AIError, Client, Conversation
@@ -253,6 +253,19 @@ def run_ai(cfg: Config, instruction: str, attachments: list) -> int:
     return 0
 
 
+def apply_sync(cfg: Config, todos: list[dict], label: str) -> tuple[list, list]:
+    """把平台待办合进记事本并保存（有改动才拍快照）；返回 (改动, 全部记事本)。"""
+    store, books = open_store(cfg)
+    archive = store.load_archive()
+    changes = sync.sync(books, archive, todos, now_minute())
+    if changes:
+        history.snapshot(store, label)  # 此时磁盘上还是同步前的内容
+        store.save_archive(archive)  # 可能动了归档（拿回未提交的条目）
+        store.save(books)
+    autosync.record_success(cfg, now_minute())
+    return changes, books
+
+
 def cmd_ucloud(cfg: Config, args: list[str]) -> int:
     if not cfg.ucloud_username or not cfg.ucloud_password:
         err.print(f"[jk.error]还没配置教学云平台账号[/]：请在 {cfg.env_file} 里填写 UCLOUD_USERNAME= 和 UCLOUD_PASSWORD=")
@@ -263,21 +276,35 @@ def cmd_ucloud(cfg: Config, args: list[str]) -> int:
     except ucloud.UcloudError as exc:
         err.print(f"[jk.error]✖[/] {escape(str(exc))}")
         return 1
-    store, books = open_store(cfg)
-    archive = store.load_archive()
-    changes = sync.sync(books, archive, todos, now_minute())
+    changes, books = apply_sync(cfg, todos, "jk u 同步教学云平台")
     console.print()
     if not changes:
         console.print(f"  [bold]已是最新[/]：平台上 {len(todos)} 项待办，没有变化。")
     else:
-        history.snapshot(store, "jk u 同步教学云平台")  # 此时磁盘上还是同步前的内容
-        store.save_archive(archive)  # 可能给归档条目绑定了 src
-        store.save(books)
         console.print(f"  [bold]同步完成[/]：平台上 {len(todos)} 项待办。")
         print_changes(changes)
         console.print("  [jk.muted]改错了？用 jk undo 撤销[/]")
     render_list(console, [nb for nb in books if nb.name == UCLOUD_BOOK])
     return 0
+
+
+def auto_sync(cfg: Config) -> None:
+    """每天第一次运行时顺手同步云邮，只打印一行；任何失败都不影响后面的命令。"""
+    now = now_minute()
+    if not autosync.due(cfg, now):
+        return
+    try:
+        with console.status("[jk.muted]今天第一次运行，正在同步云邮…[/]", spinner="dots"):
+            todos = autosync.fetch_with_timeout(cfg)
+    except ucloud.UcloudError as exc:
+        autosync.record_failure(cfg, now)
+        err.print(f"  [jk.doing]⚠ 云邮自动同步失败[/]：{escape(str(exc))}  [jk.muted]（1 小时后再试，或手动 jk u）[/]")
+        return
+    changes, _ = apply_sync(cfg, todos, "每日自动同步云邮")
+    if changes:
+        console.print(f"  [jk.recur]↻[/] 已自动同步云邮：{autosync.summarize(changes)}  [jk.muted]（jk 云邮 看详情，jk undo 撤销）[/]")
+    else:
+        console.print(f"  [jk.recur]↻[/] 已自动同步云邮：没有变化（平台上 {len(todos)} 项待办）")
 
 
 def cmd_undo(cfg: Config, args: list[str]) -> int:
@@ -357,6 +384,8 @@ def _run(cfg: Config, argv: list[str]) -> int:
     except migrate.FormatError as exc:
         err.print(f"[jk.error]✖[/] {escape(str(exc))}")
         return 1
+    if argv[:1] not in (["undo"], ["u"]):  # undo 要撤销的是你上一步，不能先被同步插一刀；u 本身就是同步
+        auto_sync(cfg)
     if not argv:
         return cmd_list(cfg, [])
     handler = COMMANDS.get(argv[0])
