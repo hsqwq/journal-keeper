@@ -26,8 +26,13 @@ def _v1_to_v2(home: Path) -> None:
             atomic_write(path, nb.to_markdown())
 
 
+def _rewrite_header(home: Path) -> None:
+    """只新增字段、旧内容不变的升级：按新格式重写一遍，文件头更新为当前版本号。"""
+    _v1_to_v2(home)
+
+
 # 旧版本号 → 把数据目录从该版本升到下一版本的函数
-MIGRATIONS: dict[int, Callable[[Path], None]] = {1: _v1_to_v2}
+MIGRATIONS: dict[int, Callable[[Path], None]] = {1: _v1_to_v2, 2: _rewrite_header}  # v3 只新增 src=
 
 _BACKUP_ITEMS = ("notebooks", "archive", "jk.json", ".env")
 

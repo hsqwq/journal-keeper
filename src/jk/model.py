@@ -14,12 +14,14 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
-FORMAT_VERSION = 2  # v2：新增周期条目（every=）
+FORMAT_VERSION = 3  # v2：周期条目（every=）；v3：外部来源编号（src=）
 
 TASK, NOTE, RECUR = "task", "note", "recur"
 KINDS = (TASK, NOTE, RECUR)
 RECUR_BOOK = "周期"  # 周期条目统一放在这个记事本里
 RECUR_MARK = "↻ "
+UCLOUD_BOOK = "云邮"  # jk u 同步来的教学云平台待办，统一放这里
+PROGRAM_BOOKS = (RECUR_BOOK, UCLOUD_BOOK)  # 由程序管理的记事本：AI 不能往里加条目、不能改名
 TODO, DOING, DONE = "todo", "doing", "done"
 STATES = (TODO, DOING, DONE)
 BOX = {TODO: " ", DOING: "/", DONE: "x"}
@@ -70,6 +72,7 @@ class Item:
     created: str = ""
     done_at: str | None = None
     every: str | None = None  # 周期规则，见 recur.py
+    src: str | None = None  # 外部来源编号，如 ucloud:2104195020042915841（同步时据此认出同一条）
 
     @property
     def is_task(self) -> bool:
@@ -91,6 +94,8 @@ class Item:
             meta.append(f"done={self.done_at}")
         if self.every:
             meta.append(f"every={self.every}")
+        if self.src:
+            meta.append(f"src={self.src}")
         box = f"[{BOX[self.state]}] " if self.is_task else RECUR_MARK if self.kind == RECUR else ""
         return f"- {box}{clean_text(self.text)} <!-- jk {' '.join(meta)} -->"
 
@@ -114,6 +119,7 @@ def parse_item(line: str) -> Item | None:
         pri=min(3, max(1, int(meta.get("pri", 1)))),
         created=meta.get("created", ""),
         done_at=meta.get("done"),
+        src=meta.get("src") or None,
     )
     try:
         item.due = parse_due(meta.get("due"))

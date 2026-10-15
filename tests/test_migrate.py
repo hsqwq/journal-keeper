@@ -59,7 +59,7 @@ def test_corrupt_version_file(tmp_path):
         migrate.ensure(tmp_path)
 
 
-# ---------- 真实的 v1 → v2 ----------
+# ---------- 真实的 v1 → 当前版本 ----------
 
 V1_NOTEBOOK = """---
 jk_format: 1
@@ -84,14 +84,14 @@ def test_real_v1_data_upgrades_without_loss(store):
     (store.archive_dir / "作业.md").write_text(V1_NOTEBOOK, encoding="utf-8")
     migrate.write_version(store.home, 1)
     msgs = migrate.ensure(store.home)
-    assert "v1 → v2" in msgs[0]
+    assert f"v1 → v{V}" in msgs[0]
     text = (store.notebooks_dir / "作业.md").read_text()
-    assert "jk_format: 2" in text and "手写的一段话" in text
+    assert f"jk_format: {V}" in text and "手写的一段话" in text
     books = store.load()
     items = {it.id: it for it in books[0].items}
     assert items[2].due == "2026-10-14T15:00" and items[2].pri == 2
     assert items[1].done_at == "2026-10-13T09:00" and items[3].kind == "note"
-    assert "jk_format: 2" in (store.archive_dir / "作业.md").read_text()
+    assert f"jk_format: {V}" in (store.archive_dir / "作业.md").read_text()
     backup = next((store.home / "backups").iterdir())
     assert (backup / "notebooks" / "作业.md").read_text() == V1_NOTEBOOK
 
@@ -100,4 +100,19 @@ def test_v1_data_without_version_file(store):
     """早期没有 jk.json 的数据：按文件头里的 v1 识别并升级。"""
     store.notebooks_dir.mkdir(parents=True)
     (store.notebooks_dir / "作业.md").write_text(V1_NOTEBOOK, encoding="utf-8")
-    assert "v1 → v2" in migrate.ensure(store.home)[0]
+    assert f"v1 → v{V}" in migrate.ensure(store.home)[0]
+
+
+def test_v2_with_recur_upgrades_and_src_roundtrip(store):
+    from jk.model import parse_item
+
+    v2 = V1_NOTEBOOK.replace("jk_format: 1", "jk_format: 2").replace(
+        "- 一个想法", "- ↻ 跑步 <!-- jk id=4 every=weekly:1@08:00 -->\n- 一个想法")
+    store.notebooks_dir.mkdir(parents=True)
+    (store.notebooks_dir / "作业.md").write_text(v2, encoding="utf-8")
+    migrate.write_version(store.home, 2)
+    assert f"v2 → v{V}" in migrate.ensure(store.home)[0]
+    items = {it.id: it for it in store.load()[0].items}
+    assert items[4].every == "weekly:1@08:00"
+    it = Item(7, "交报告", src="ucloud:123", created="2026-10-15T10:00")
+    assert parse_item(it.to_line()) == it
