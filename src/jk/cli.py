@@ -137,6 +137,8 @@ def cmd_check(cfg: Config, args: list[str]) -> int:
         else:
             item.state, item.done_at = DONE, now
             console.print(f"  [jk.done]✔ 完成[/] {item.id}. {escape(item.text)}")
+            if item.src:
+                console.print("    [jk.muted]这是云邮待办：平台上没提交的话，下次 jk u 会改回未完成[/]")
     store.save(books)
     render_list(console, books)
     return 0
@@ -262,12 +264,14 @@ def cmd_ucloud(cfg: Config, args: list[str]) -> int:
         err.print(f"[jk.error]✖[/] {escape(str(exc))}")
         return 1
     store, books = open_store(cfg)
-    changes = sync.sync(books, store.load_archive(), todos, now_minute())
+    archive = store.load_archive()
+    changes = sync.sync(books, archive, todos, now_minute())
     console.print()
     if not changes:
         console.print(f"  [bold]已是最新[/]：平台上 {len(todos)} 项待办，没有变化。")
     else:
         history.snapshot(store, "jk u 同步教学云平台")  # 此时磁盘上还是同步前的内容
+        store.save_archive(archive)  # 可能给归档条目绑定了 src
         store.save(books)
         console.print(f"  [bold]同步完成[/]：平台上 {len(todos)} 项待办。")
         print_changes(changes)

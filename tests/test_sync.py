@@ -50,19 +50,25 @@ def test_gone_from_platform_marks_done_once():
     assert sync(books, [], [todo("B", "第三次作业")], NOW) == []
 
 
-def test_locally_done_stays_done():
+def test_locally_done_but_still_on_platform_is_reopened():
     books = []
     sync(books, [], [todo("A", "第二次作业")], NOW)
     item = ucloud_book(books).items[0]
     item.state, item.done_at = DONE, "2026-10-15T11:00"
+    changes = sync(books, [], [todo("A", "第二次作业")], NOW)
+    assert item.state == "todo" and item.done_at is None
+    assert [c.kind for c in changes] == ["undone"] and "平台上还没提交" in changes[0].detail
     assert sync(books, [], [todo("A", "第二次作业")], NOW) == []
-    assert item.state == DONE
 
 
-def test_archived_not_readded():
+def test_archived_but_still_on_platform_comes_back_with_new_id():
     archive = [Notebook(UCLOUD_BOOK, [Item(3, "x", state=DONE, done_at="2026-10-13T10:00", src="ucloud:A")])]
-    books = []
-    assert sync(books, archive, [todo("A", "第二次作业")], NOW) == []
+    books = [Notebook("生活", [Item(3, "买猫粮")])]  # 编号 3 已经被别的条目用了
+    changes = sync(books, archive, [todo("A", "第二次作业")], NOW)
+    nb, item = find_item(books, 1)
+    assert nb.name == UCLOUD_BOOK and item.src == "ucloud:A" and item.state == "todo"
+    assert item.text == "〔编译原理与技术〕第二次作业" and archive[0].items == []
+    assert changes[0].kind == "undone" and "从归档拿回" in changes[0].detail
 
 
 def test_claims_handwritten_item_keeps_id_and_state():
@@ -74,10 +80,10 @@ def test_claims_handwritten_item_keeps_id_and_state():
     changes = sync(books, [], [todo("A", "第二次作业"), todo("B", "第三次作业——语法分析器", end="2026-11-08 23:59")], NOW)
     nb, a = find_item(books, 4)
     assert nb.name == UCLOUD_BOOK and a.src == "ucloud:A" and a.created == "2026-10-10T09:00"
-    nb, b = find_item(books, 5)
-    assert nb.name == UCLOUD_BOOK and b.state == DONE and b.due == "2026-11-08T23:59"
+    nb, b = find_item(books, 5)  # jk 里标了完成、平台上还挂着 → 认领并改回未完成
+    assert nb.name == UCLOUD_BOOK and b.state == "todo" and b.due == "2026-11-08T23:59"
     assert find_item(books, 6)[0].name == "作业"  # 笔记不认领
-    assert all(c.kind == "update" and "认领" in c.detail for c in changes)
+    assert [c.kind for c in changes] == ["update", "undone"] and all("认领" in c.detail for c in changes)
 
 
 def test_claim_requires_same_day():
@@ -163,3 +169,24 @@ def test_ucloud_book_listed_after_recur(home, monkeypatch, capsys):
     cli.main([])
     out = capsys.readouterr().out
     assert out.index("周期") < out.index("云邮") < out.index("作业 [")
+
+
+def test_archived_handwritten_done_is_claimed_back():
+    archive = [Notebook("作业", [Item(2, "第二次作业——词法分析器实验", state=DONE,
+                                     due="2026-10-31T23:59", done_at="2026-10-12T20:00")])]
+    books = []
+    changes = sync(books, archive, [todo("A", "第二次作业——词法分析器实验")], NOW)
+    item = ucloud_book(books).items[0]
+    assert item.src == "ucloud:A" and item.state == "todo" and archive[0].items == []
+    assert [c.kind for c in changes] == ["undone"] and "从归档拿回" in changes[0].detail
+    assert sync(books, archive, [todo("A", "第二次作业——词法分析器实验")], NOW) == []
+
+
+def test_jk_c_on_ucloud_item_warns(home, monkeypatch, capsys):
+    fake_fetch(monkeypatch, [todo("A", "第二次作业")])
+    cli.main(["u"])
+    capsys.readouterr()
+    assert cli.main(["c", "1"]) == 0
+    assert "下次 jk u 会改回未完成" in capsys.readouterr().out
+    cli.main(["u"])
+    assert "☐ 取消完成 1." in capsys.readouterr().out
