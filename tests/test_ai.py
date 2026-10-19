@@ -241,3 +241,55 @@ def test_jk_a_adds_recur_and_jk_c_refuses(env, monkeypatch, capsys):
     assert "- ↻ 跑步" in (env / "notebooks" / "周期.md").read_text()
     assert cli.main(["c", "1"]) == 1
     assert "周期条目" in capsys.readouterr().err
+
+
+# ---------- 教学周 ----------
+
+from datetime import date  # noqa: E402
+
+from jk.term import Term  # noqa: E402
+
+
+MON = datetime(2026, 10, 19, 9, 30)
+
+
+def test_parse_set_week():
+    ex = parse_response('{"reply": "好", "ops": [{"op": "set_week", "week": 8}]}', books(), MON)
+    assert ex.term == {"week1_start": "2026-08-31", "week": 8} and ex.ops == []
+
+
+def test_parse_set_week_with_other_ops_and_invalid():
+    ex = parse_response('{"ops": [{"op": "set_week", "week": 7}, {"op": "add", "notebook": "作业", "text": "x"}]}', books(), MON)
+    assert ex.term["week"] == 7 and len(ex.ops) == 1
+    for bad in ('{"ops": [{"op": "set_week", "week": 99}]}',
+                '{"ops": [{"op": "set_week", "week": 8}, {"op": "set_week", "week": 9}]}'):
+        with pytest.raises(PlanError):
+            parse_response(bad, books(), MON)
+
+
+def test_context_includes_term():
+    ctx = json.loads(build_context(books(), [], MON, Term(date(2026, 8, 31))))
+    assert ctx["教学周"] == {"当前": 8, "第一周开始": "2026-08-31"}
+    assert json.loads(build_context(books(), [], MON))["教学周"] == "未设置"
+
+
+def test_jk_a_sets_week_and_list_shows_it(env, monkeypatch, capsys):
+    use_fake(monkeypatch, {"reply": "好，现在是第 8 周", "ops": [{"op": "set_week", "week": 8}]})
+    assert cli.main(["a", "现在是第8周"]) == 0
+    out = capsys.readouterr().out
+    assert "教学周 第 8 周" in out and "第 1 周从 8月31日 开始" in out
+    assert '"week1_start": "2026-08-31"' in (env / "state.json").read_text()
+    capsys.readouterr()
+    cli.main([])
+    assert "·  第 8 周" in capsys.readouterr().out
+    assert not (env / "history").exists()  # 只设置周次，不拍快照
+
+
+def test_jk_a_week_setting_does_not_undo_previous_change(env, monkeypatch, capsys):
+    use_fake(monkeypatch, {"reply": "", "ops": [{"op": "add", "notebook": "作业", "text": "a"}]})
+    cli.main(["a", "x"])
+    use_fake(monkeypatch, {"reply": "", "ops": [{"op": "set_week", "week": 6}]})
+    cli.main(["a", "现在是第6周"])
+    assert cli.main(["undo"]) == 0  # 撤销的是新增，不是周次
+    assert not (env / "notebooks" / "作业.md").exists()
+    assert '"week1_start": "2026-09-14"' in (env / "state.json").read_text()

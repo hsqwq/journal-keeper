@@ -7,56 +7,32 @@
 
 from __future__ import annotations
 
-import json
 import threading
 from datetime import datetime, timedelta
-from pathlib import Path
 
-from . import ucloud
+from . import state, ucloud
 from .config import Config
-from .store import atomic_write
 
 TIMEOUT = 10  # 秒
 RETRY_AFTER = timedelta(hours=1)
 
 
-def _state_path(cfg: Config) -> Path:
-    return cfg.home / "state.json"
-
-
-def read_state(cfg: Config) -> dict:
-    try:
-        data = json.loads(_state_path(cfg).read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
-
-
-def _write_state(cfg: Config, **fields) -> None:
-    state = read_state(cfg)
-    state.update(fields)
-    try:
-        atomic_write(_state_path(cfg), json.dumps(state, ensure_ascii=False) + "\n")
-    except OSError:
-        pass  # 记不下来最多是多同步一次
-
-
 def record_success(cfg: Config, now: datetime) -> None:
-    _write_state(cfg, ucloud_synced_on=now.date().isoformat(), ucloud_failed_at=None)
+    state.update(cfg, ucloud_synced_on=now.date().isoformat(), ucloud_failed_at=None)
 
 
 def record_failure(cfg: Config, now: datetime) -> None:
-    _write_state(cfg, ucloud_failed_at=now.isoformat(timespec="seconds"))
+    state.update(cfg, ucloud_failed_at=now.isoformat(timespec="seconds"))
 
 
 def due(cfg: Config, now: datetime) -> bool:
     """今天还没成功同步过、且不在失败冷却期内，才自动同步。没配账号或关掉了就不同步。"""
     if not cfg.ucloud_auto or not cfg.ucloud_username or not cfg.ucloud_password:
         return False
-    state = read_state(cfg)
-    if state.get("ucloud_synced_on") == now.date().isoformat():
+    saved = state.read(cfg)
+    if saved.get("ucloud_synced_on") == now.date().isoformat():
         return False
-    failed = state.get("ucloud_failed_at")
+    failed = saved.get("ucloud_failed_at")
     if failed:
         try:
             if now - datetime.fromisoformat(failed) < RETRY_AFTER:

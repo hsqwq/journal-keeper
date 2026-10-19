@@ -12,6 +12,7 @@ from rich.text import Text
 
 from .model import DOING, DONE, NOTE, PROGRAM_BOOKS, RECUR, RECUR_BOOK, Item, Notebook, due_datetime
 from .recur import describe, next_occurrence, parse_rule
+from .term import Term
 
 WEEKDAYS = "一二三四五六日"
 ICONS = {"todo": ("☐", "jk.todo"), DOING: ("…", "jk.doing"), DONE: ("✔", "jk.done"), NOTE: ("●", "jk.note"), RECUR: ("↻", "jk.recur")}
@@ -172,11 +173,28 @@ def book_order(nb: Notebook) -> int:
     return PROGRAM_BOOKS.index(nb.name) if nb.name in PROGRAM_BOOKS else len(PROGRAM_BOOKS)
 
 
-def render_list(console: Console, books: list[Notebook], now: datetime | None = None) -> None:
+def header_text(term: Term | None, now: datetime) -> Text:
+    """第一行：日期 + 星期 + 教学周。周次不显示总数，保持安静。"""
+    line = Text("  ")
+    line.append(f"{now.year}年{now.month}月{now.day}日 周{WEEKDAYS[now.weekday()]}", style="jk.muted")
+    line.append("  ·  ", style="jk.muted")
+    week = term.week(now.date()) if term else None
+    if term is None:
+        line.append("教学周未设置", style="jk.muted")
+    elif week is None:
+        line.append("未开学", style="jk.doing")
+    else:
+        line.append(f"第 {week} 周", style="bold jk.recur")
+    return line
+
+
+def render_list(console: Console, books: list[Notebook], now: datetime | None = None, term: Term | None = None) -> None:
     now = now or datetime.now()
     books = sorted((nb for nb in books if nb.items), key=book_order)
+    console.print()
+    console.print(header_text(term, now))
     if not books:
-        console.print("\n  [jk.muted]还没有内容。试试：[/]jk a 明天下午三点前交作业 a\n")
+        console.print("    [jk.muted]还没有内容。试试：[/]jk a 明天下午三点前交作业 a\n")
         return
     render_groups(console, [(notebook_header(nb), [item_row(it, now) for it in sorted_items(nb, now)]) for nb in books])
     console.print(summary(books))

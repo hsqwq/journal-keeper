@@ -11,7 +11,7 @@
 | `archive/<名字>.md` | 归档，同名对应，格式相同 |
 | `history/<时间戳>/` | 撤销快照：`notebooks/`、`archive/` 的整份拷贝 + `meta.json` |
 | `backups/<时间戳>-v<旧版本>/` | 格式升级前的整份备份 |
-| `state.json` | 运行状态（`ucloud_synced_on` 今天是否已同步、`ucloud_failed_at` 上次失败时间）；不属于数据格式，删掉只会多同步一次 |
+| `state.json` | 运行状态（`ucloud_synced_on` 今天是否已同步、`ucloud_failed_at` 上次失败时间、`term.week1_start` 教学周第一周的周一）；不属于数据格式，删掉只会多同步一次 |
 | `pastes/<时间戳>/` | 输入框的粘贴内容（`1.txt`、`2.png`…），发送后删除；不属于数据格式，不迁移 |
 
 ## 记事本文件

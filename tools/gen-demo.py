@@ -16,13 +16,14 @@ import io
 import shutil
 import subprocess
 import tempfile
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from jk import cli
 from jk.model import DOING, DONE, NOTE, RECUR, Item, Notebook
 from jk.ops import Change, apply, validate
 from jk.render import render_list
+from jk.term import Term
 from jk.theme import make_console
 from jk.timeline import render_timeline
 
@@ -105,7 +106,7 @@ def prompt(console, command: str) -> None:
 def demo_list() -> None:
     console = make_console(record=True, width=WIDTH, file=io.StringIO())
     prompt(console, "jk")
-    render_list(console, demo_books(), NOW)
+    render_list(console, demo_books(), NOW, Term(date(2026, 8, 31)))  # 第 7 周
     save(console, "list", "jk")
 
 

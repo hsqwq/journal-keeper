@@ -6,14 +6,14 @@ import sys
 
 from rich.markup import escape
 
-from . import __version__, autosync, complete, history, migrate, sync, ucloud
+from . import __version__, autosync, complete, history, migrate, sync, term, ucloud
 from .attach import AttachError, image_from_path, looks_secret
 from .compose import compose
 from .ai import AIError, Client, Conversation
 from .archive import auto_archive
 from .config import Config, ensure_env_file, load_config
 from .model import DONE, NOTE, RECUR, TODO, UCLOUD_BOOK, fmt_dt, now_minute
-from .ops import apply, dedupe, skipped_changes
+from .ops import Change, apply, dedupe, skipped_changes
 from .render import render_list, render_search
 from .store import Store, find_item
 from .theme import make_console
@@ -46,6 +46,7 @@ HELP = """\
   jk a 每周一早上八点跑步
   jk a 每周二、四下午四点打羽毛球
   jk a 明天要交什么
+  jk a 现在是第 8 周
   jk a 这是课程通知 ~/图片/通知.png
   [jk.muted]AI 没听懂时会给编号选项，输数字选择；直接回车取消。[/]
 
@@ -63,6 +64,10 @@ HELP = """\
 """
 
 
+def show_list(cfg: Config, books: list) -> None:
+    render_list(console, books, term=term.load(cfg))
+
+
 def open_store(cfg: Config) -> tuple[Store, list]:
     store = Store(cfg.home)
     books = store.load()
@@ -73,7 +78,7 @@ def open_store(cfg: Config) -> tuple[Store, list]:
 def cmd_list(cfg: Config, args: list[str]) -> int:
     _, books = open_store(cfg)
     if not args:
-        render_list(console, books)
+        show_list(cfg, books)
         return 0
     picked = pick_notebooks(books, args)
     if not picked:
@@ -82,7 +87,7 @@ def cmd_list(cfg: Config, args: list[str]) -> int:
         err.print(f"  现有记事本：{escape(names)}")
         err.print(f"  想让 AI 处理请用：jk a {escape(' '.join(args))}；查看帮助：jk h")
         return 2
-    render_list(console, picked)
+    show_list(cfg, picked)
     return 0
 
 
@@ -140,7 +145,7 @@ def cmd_check(cfg: Config, args: list[str]) -> int:
             if item.src:
                 console.print("    [jk.muted]这是云邮待办：平台上没提交的话，下次 jk u 会改回未完成[/]")
     store.save(books)
-    render_list(console, books)
+    show_list(cfg, books)
     return 0
 
 
@@ -152,6 +157,7 @@ CHANGE_STYLE = {
     "delete": ("✖ 删除", "jk.delete"),
     "rename": ("⇄ 记事本", "jk.note"),
     "dup": ("≈ 已存在", "jk.dup"),
+    "term": ("教学周", "jk.recur"),
 }
 
 
@@ -215,8 +221,9 @@ def run_ai(cfg: Config, instruction: str, attachments: list) -> int:
             return 1
     store, books = open_store(cfg)
     archive = store.load_archive()
+    current_term = term.load(cfg)
     try:
-        conv = Conversation(Client(cfg), books, archive, instruction, now_minute(), attachments)
+        conv = Conversation(Client(cfg), books, archive, instruction, now_minute(), attachments, current_term)
         while True:
             busy = "AI 正在看图…" if any(a.kind == "image" for a in attachments) else "AI 思考中…"
             with console.status(f"[jk.muted]{busy}[/]", spinner="dots"):
@@ -237,6 +244,11 @@ def run_ai(cfg: Config, instruction: str, attachments: list) -> int:
         return 1
     skipped = skipped_changes(result.skipped, books)
     ops, dups = dedupe(result.ops, books, archive, now_minute())
+    term_changes = []
+    if result.term:
+        saved = term.save(cfg, result.term)
+        term_changes = [Change("term", f"第 {result.term['week']} 周",
+                               f"第 1 周从 {saved.week1_start.month}月{saved.week1_start.day}日 开始")]
     changes = []
     if ops:
         label = " ".join([instruction] + [f"[{att.describe()}]" for att in attachments]).strip()
@@ -246,10 +258,12 @@ def run_ai(cfg: Config, instruction: str, attachments: list) -> int:
     console.print()
     if result.reply:
         console.print(f"  [bold]{escape(result.reply)}[/]")
-    print_changes(changes + skipped + dups)
+    print_changes(changes + skipped + dups + term_changes)
     if changes:
         console.print("  [jk.muted]改错了？用 jk undo 撤销[/]")
-        render_list(console, books)
+        show_list(cfg, books)
+    elif term_changes:
+        show_list(cfg, books)
     return 0
 
 
@@ -284,7 +298,7 @@ def cmd_ucloud(cfg: Config, args: list[str]) -> int:
         console.print(f"  [bold]同步完成[/]：平台上 {len(todos)} 项待办。")
         print_changes(changes)
         console.print("  [jk.muted]改错了？用 jk undo 撤销[/]")
-    render_list(console, [nb for nb in books if nb.name == UCLOUD_BOOK])
+    show_list(cfg, [nb for nb in books if nb.name == UCLOUD_BOOK])
     return 0
 
 
