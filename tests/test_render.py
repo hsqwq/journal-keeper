@@ -113,3 +113,25 @@ def test_long_recur_rule_does_not_squeeze_text():
     lines = [l for l in console.export_text().splitlines() if l.strip()]
     assert any("提交操作系统实验报告 !" in l for l in lines)  # 内容没被折成两行
     assert any(l.rstrip().endswith("每周一、三、五 07:00 · 下次 明天") for l in lines)
+
+
+def test_header_shows_date_and_week():
+    from jk.term import Term
+
+    console = make_console(record=True, width=90)
+    render_list(console, [Notebook("作业", [Item(1, "x")])], NOW, Term(__import__("datetime").date(2026, 8, 31)))
+    first = console.export_text().splitlines()[1]
+    assert first.strip() == "2026年10月13日 周二  ·  第 7 周"
+
+
+def test_header_without_term_and_before_start():
+    from datetime import date
+
+    from jk.term import Term
+
+    console = make_console(record=True, width=90)
+    render_list(console, [Notebook("作业", [Item(1, "x")])], NOW)
+    assert "教学周未设置" in console.export_text().splitlines()[1]
+    console = make_console(record=True, width=90)
+    render_list(console, [Notebook("作业", [Item(1, "x")])], NOW, Term(date(2027, 1, 4)))
+    assert "未开学" in console.export_text().splitlines()[1]

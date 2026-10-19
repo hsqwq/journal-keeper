@@ -10,6 +10,7 @@ from .attach import Attachment
 from .config import Config
 from .model import NOTE, RECUR, Notebook, fmt_dt
 from .recur import next_occurrence, parse_rule
+from . import term
 from .ops import ARCHIVE_LOOKBACK_DAYS, PlanError, validate, validate_skipped
 from .render import WEEKDAYS
 
@@ -38,6 +39,7 @@ SYSTEM_PROMPT = """\
   周期条目只能改 text 和 every。
 - 删除：{"op": "delete", "id": 3}（仅当用户明确要删除/不要了/取消这件事；「做完了」是 state=done，不是删除）
 - 记事本改名或合并：{"op": "rename_notebook", "from": "旧名", "to": "新名"}（新名已存在即合并）
+- 设置教学周：{"op": "set_week", "week": 8}，或 {"op": "set_week", "week1_start": "2026-09-01"}
 
 ## 规则
 1. 时间：以「当前时间」和「日历」为准换算相对时间。due 用 YYYY-MM-DDTHH:MM；只知道日期就用 YYYY-MM-DD。
@@ -67,6 +69,10 @@ SYSTEM_PROMPT = """\
     - 改时间/改天 → update every；「不跑了/这门课结课了/取消例会」→ delete。周期条目没有「完成」，不要给它设 state。
     - 每两周、单双周、每年等不支持的规则 → ops 留空，在 reply 里说明目前只支持每天/工作日/每周几/每月几号。
     - 只发生一次的事（如「下周一八点跑步」）是普通任务，不是周期。
+15. 教学周：用户说「现在是第 8 周」「这周是第 9 教学周」→ {"op": "set_week", "week": 8}；
+    说「第一周从 9 月 1 日开始」→ {"op": "set_week", "week1_start": "2026-09-01"}。这类操作只改周次设置，不碰记事本。
+    上下文里的「教学周」是当前设置，用户只问「现在第几周」→ 按它回答，不要输出 set_week；没设置就如实说未设置。
+    一次最多一条 set_week；用户同一句话还交代了别的事，可以和其他操作一起输出。
 14. 「云邮」记事本放的是从学校教学云平台自动同步来的待办（text 开头的〔…〕是课程名），由程序维护：
     - 不要往「云邮」里 add，也不要把别的条目移进去或给它改名；用户新说的事放进其他合适的记事本。
     - 用户说「某某作业交了/做完了」时，可以对云邮里的条目 update state=done。
@@ -81,9 +87,10 @@ class Exchange:
     ops: list[dict] = field(default_factory=list)
     ask: dict | None = None
     skipped: list[dict] = field(default_factory=list)
+    term: dict | None = None  # set_week 的结果（已校验）
 
 
-def build_context(books: list[Notebook], archive: list[Notebook], now: datetime) -> str:
+def build_context(books: list[Notebook], archive: list[Notebook], now: datetime, term=None) -> str:
     calendar = []
     for offset in range(-1, 8):
         d = now.date() + timedelta(days=offset)
@@ -116,6 +123,7 @@ def build_context(books: list[Notebook], archive: list[Notebook], now: datetime)
     ]
     data = {
         "当前时间": f"{now:%Y-%m-%d %H:%M} 周{WEEKDAYS[now.weekday()]}",
+        "教学周": term_context(term, now),
         "日历": calendar,
         "记事本": notebooks,
         "最近归档（只读，无编号，不可修改）": archived,
@@ -123,7 +131,14 @@ def build_context(books: list[Notebook], archive: list[Notebook], now: datetime)
     return json.dumps(data, ensure_ascii=False)
 
 
-def parse_response(raw: str, books: list[Notebook]) -> Exchange:
+def term_context(term, now: datetime) -> dict | str:
+    if term is None:
+        return "未设置"
+    week = term.week(now.date())
+    return {"当前": week, "第一周开始": term.week1_start.isoformat()} if week else {"当前": None, "第一周开始": term.week1_start.isoformat()}
+
+
+def parse_response(raw: str, books: list[Notebook], now: datetime | None = None) -> Exchange:
     """解析并校验 AI 输出；不合法抛 PlanError（消息会回传给 AI）。"""
     raw = (raw or "").strip()
     if raw.startswith("```"):
@@ -142,10 +157,26 @@ def parse_response(raw: str, books: list[Notebook]) -> Exchange:
         if not isinstance(ask, dict) or not ask.get("question") or not isinstance(options, list) or not options:
             raise PlanError("ask 必须包含 question 和非空 options 数组")
         return Exchange(reply=str(data.get("reply") or ""), ask={"question": str(ask["question"]), "options": [str(o) for o in options][:9]})
+    raw_ops = data.get("ops") or []
+    term_op = None
+    if isinstance(raw_ops, list):
+        rest = []
+        for op in raw_ops:
+            if isinstance(op, dict) and op.get("op") == "set_week":
+                if term_op is not None:
+                    raise PlanError("一次只能设置一条教学周")
+                try:
+                    term_op = term.parse_op(op, now or datetime.now())
+                except term.TermError as exc:
+                    raise PlanError(str(exc)) from None
+            else:
+                rest.append(op)
+        raw_ops = rest
     return Exchange(
         reply=str(data.get("reply") or ""),
-        ops=validate(data.get("ops") or [], books),
+        ops=validate(raw_ops, books),
         skipped=validate_skipped(data.get("skipped"), books),
+        term=term_op,
     )
 
 
@@ -214,13 +245,15 @@ class Conversation:
     """一次 jk a 的多轮对话：反问 → 用户回答 → 再问 AI；输出不合法时让 AI 自己改正。"""
 
     def __init__(self, client, books: list[Notebook], archive: list[Notebook], instruction: str, now: datetime,
-                 attachments: list[Attachment] = ()):
+                 attachments: list[Attachment] = (), term=None):
         self.client = client
         self.books = books
+        self.now = now
+        self.term = term
         self.rounds = 0
         self.messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_content(build_context(books, archive, now), instruction, list(attachments))},
+            {"role": "user", "content": user_content(build_context(books, archive, now, term), instruction, list(attachments))},
         ]
 
     def step(self) -> Exchange:
@@ -229,7 +262,7 @@ class Conversation:
             self.rounds += 1
             raw = self.client.complete(self.messages)
             try:
-                result = parse_response(raw, self.books)
+                result = parse_response(raw, self.books, self.now)
             except PlanError as exc:
                 last_error = str(exc)
                 if raw.strip():
